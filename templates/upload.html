@@ -23,9 +23,35 @@
     </label>
 
     <div class="capture-section" data-section="audio">
+      <div class="microphone-recorder" id="microphoneRecorder">
+        <div class="recorder-heading">
+          <div>
+            <strong>Record with your microphone</strong>
+            <p class="muted source-note">Record a thought directly in the browser, then submit it for transcription.</p>
+          </div>
+          <span class="recording-status" id="recordingStatus" aria-live="polite">Ready</span>
+        </div>
+
+        <div class="recorder-display">
+          <span class="recording-dot" id="recordingDot" aria-hidden="true"></span>
+          <span class="recording-timer" id="recordingTimer">00:00</span>
+        </div>
+
+        <div class="recorder-actions">
+          <button type="button" class="primary" id="startRecordingButton">Start Recording</button>
+          <button type="button" id="stopRecordingButton" disabled>Stop</button>
+          <button type="button" id="discardRecordingButton" hidden>Discard</button>
+        </div>
+
+        <audio id="recordingPreview" controls hidden></audio>
+        <p class="muted recorder-help" id="recorderHelp">Microphone access requires HTTPS on the live site or localhost during development.</p>
+      </div>
+
+      <div class="upload-divider"><span>or upload an existing file</span></div>
+
       <label>
         Audio file
-        <input type="file" name="audio" accept="audio/*,video/mp4">
+        <input type="file" name="audio" id="audioFileInput" accept="audio/*,video/mp4">
       </label>
 
       <label>

@@ -320,52 +320,14 @@ def extract_document_text(local_path: str) -> str:
     raise ValueError("Unsupported document type.")
 
 
-def transcribe_audio(file_path: str) -> str:
-    """Transcribe an audio file using Together AI Whisper."""
+def transcribe_audio(local_path: str, model_name: str = "base") -> str:
+    import whisper
 
-    api_key = os.getenv("TOGETHER_API_KEY")
-    if not api_key:
-        raise RuntimeError("TOGETHER_API_KEY is not configured.")
+    model = whisper.load_model(model_name)
 
-    try:
-        from together import Together
-    except ImportError as exc:
-        raise RuntimeError(
-            "Together SDK is not installed. Run: pip install -r requirements.txt"
-        ) from exc
+    result = model.transcribe(local_path)
 
-    if not os.path.exists(file_path):
-        raise RuntimeError(f"Audio file was not found: {file_path}")
-
-    client = Together(api_key=api_key)
-
-    try:
-        with open(file_path, "rb") as audio_file:
-            response = client.audio.transcriptions.create(
-                model=os.getenv(
-                    "TOGETHER_TRANSCRIPTION_MODEL",
-                    "openai/whisper-large-v3",
-                ),
-                file=audio_file,
-                language="en",
-                response_format="json",
-            )
-    except Exception as exc:
-        raise RuntimeError(
-            f"Together transcription failed: {exc}"
-        ) from exc
-
-    transcript = getattr(response, "text", None)
-
-    if transcript is None and isinstance(response, dict):
-        transcript = response.get("text")
-
-    transcript = (transcript or "").strip()
-
-    if not transcript:
-        raise RuntimeError("Together returned an empty transcription.")
-
-    return transcript
+    return result["text"].strip()
 
 
 
@@ -706,7 +668,7 @@ def upload():
             transcript_text = manual_transcript
             if should_transcribe and not transcript_text:
                 try:
-                    transcript_text = transcribe_audio(local_path)
+                    transcript_text = transcribe_audio(local_path, selected_model)
                 except Exception as exc:
                     flash(f"Uploaded audio, but transcription failed: {exc}", "error")
 
@@ -725,7 +687,6 @@ def upload():
             transcript_original=transcript_text,
             transcript_working=transcript_text,
             review_status="unread",
-            processing_status = "transcribed",
         )
         db.session.add(entry)
         db.session.commit()

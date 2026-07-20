@@ -599,3 +599,105 @@ code {
 .checkbox-row input { width: auto; }
 .auth-switch { margin: 6px 0 0; text-align: center; }
 .user-email { opacity: .7; font-size: .9rem; }
+
+.microphone-recorder {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid rgba(139, 92, 246, .35);
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(139, 92, 246, .12), rgba(15, 23, 42, .78));
+}
+
+.recorder-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.recording-status {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: .82rem;
+}
+
+.recorder-display {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 86px;
+  border-radius: 14px;
+  background: rgba(2, 6, 23, .52);
+}
+
+.recording-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #64748b;
+}
+
+.recording-dot.active {
+  background: #ef4444;
+  box-shadow: 0 0 0 7px rgba(239, 68, 68, .14);
+  animation: recordingPulse 1.25s ease-in-out infinite;
+}
+
+.recording-timer {
+  font-variant-numeric: tabular-nums;
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+.recorder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.recorder-actions button {
+  width: auto;
+  min-width: 120px;
+}
+
+#recordingPreview {
+  width: 100%;
+}
+
+.recorder-help {
+  margin: 0;
+}
+
+.upload-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: .85rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+.upload-divider::before,
+.upload-divider::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: var(--border);
+}
+
+@keyframes recordingPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(.82); opacity: .72; }
+}
+
+@media (max-width: 620px) {
+  .recorder-heading { flex-direction: column; }
+  .recorder-actions button { flex: 1 1 100%; }
+}

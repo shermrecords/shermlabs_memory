@@ -311,3 +311,185 @@ document.addEventListener("DOMContentLoaded", function() {
   attachUploadLoadingOverlay();
   loadVoices();
 });
+
+function setupMicrophoneRecorder() {
+  const startButton = document.getElementById("startRecordingButton");
+  const stopButton = document.getElementById("stopRecordingButton");
+  const discardButton = document.getElementById("discardRecordingButton");
+  const audioInput = document.getElementById("audioFileInput");
+  const preview = document.getElementById("recordingPreview");
+  const status = document.getElementById("recordingStatus");
+  const timer = document.getElementById("recordingTimer");
+  const dot = document.getElementById("recordingDot");
+  const help = document.getElementById("recorderHelp");
+
+  if (!startButton || !audioInput) return;
+
+  if (!navigator.mediaDevices?.getUserMedia || !("MediaRecorder" in window)) {
+    startButton.disabled = true;
+    status.textContent = "Unavailable";
+    help.textContent = "This browser does not support microphone recording. You can still upload an audio file.";
+    return;
+  }
+
+  let recorder = null;
+  let stream = null;
+  let chunks = [];
+  let objectUrl = null;
+  let timerId = null;
+  let startedAt = 0;
+
+  const formatTime = (seconds) => {
+    const minutes = Math.floor(seconds / 60).toString().padStart(2, "0");
+    const remainder = Math.floor(seconds % 60).toString().padStart(2, "0");
+    return `${minutes}:${remainder}`;
+  };
+
+  const updateTimer = () => {
+    timer.textContent = formatTime((Date.now() - startedAt) / 1000);
+  };
+
+  const stopTracks = () => {
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      stream = null;
+    }
+  };
+
+  const chooseMimeType = () => {
+    const choices = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/mp4",
+      "audio/ogg;codecs=opus"
+    ];
+    return choices.find(type => MediaRecorder.isTypeSupported(type)) || "";
+  };
+
+  const extensionForMime = (mimeType) => {
+    if (mimeType.includes("mp4")) return "m4a";
+    if (mimeType.includes("ogg")) return "ogg";
+    return "webm";
+  };
+
+  const resetRecording = () => {
+    clearInterval(timerId);
+    timerId = null;
+    stopTracks();
+    recorder = null;
+    chunks = [];
+    timer.textContent = "00:00";
+    status.textContent = "Ready";
+    dot.classList.remove("active");
+    startButton.disabled = false;
+    stopButton.disabled = true;
+    discardButton.hidden = true;
+    preview.hidden = true;
+    preview.removeAttribute("src");
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    objectUrl = null;
+    audioInput.value = "";
+  };
+
+  startButton.addEventListener("click", async () => {
+    try {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      objectUrl = null;
+      preview.hidden = true;
+      preview.removeAttribute("src");
+      audioInput.value = "";
+      chunks = [];
+
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+
+      const mimeType = chooseMimeType();
+      recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+
+      recorder.addEventListener("dataavailable", event => {
+        if (event.data && event.data.size > 0) chunks.push(event.data);
+      });
+
+      recorder.addEventListener("stop", () => {
+        clearInterval(timerId);
+        timerId = null;
+        stopTracks();
+
+        const finalMimeType = recorder.mimeType || mimeType || "audio/webm";
+        const blob = new Blob(chunks, { type: finalMimeType });
+        const extension = extensionForMime(finalMimeType);
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const file = new File([blob], `microphone_recording_${stamp}.${extension}`, {
+          type: finalMimeType,
+          lastModified: Date.now()
+        });
+
+        const transfer = new DataTransfer();
+        transfer.items.add(file);
+        audioInput.files = transfer.files;
+
+        objectUrl = URL.createObjectURL(blob);
+        preview.src = objectUrl;
+        preview.hidden = false;
+        status.textContent = "Recording ready";
+        dot.classList.remove("active");
+        startButton.disabled = false;
+        startButton.textContent = "Record Again";
+        stopButton.disabled = true;
+        discardButton.hidden = false;
+        help.textContent = "Your recording is attached below. Preview it, then click Create Entry.";
+      });
+
+      recorder.start(250);
+      startedAt = Date.now();
+      updateTimer();
+      timerId = setInterval(updateTimer, 250);
+      status.textContent = "Recording";
+      dot.classList.add("active");
+      startButton.disabled = true;
+      stopButton.disabled = false;
+      discardButton.hidden = true;
+      help.textContent = "Speak normally. Click Stop when you are finished.";
+    } catch (error) {
+      stopTracks();
+      status.textContent = "Microphone blocked";
+      startButton.disabled = false;
+      stopButton.disabled = true;
+      help.textContent = error?.name === "NotAllowedError"
+        ? "Microphone permission was denied. Allow microphone access in your browser settings and try again."
+        : `Could not start recording: ${error?.message || "Unknown error"}`;
+    }
+  });
+
+  stopButton.addEventListener("click", () => {
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+  });
+
+  discardButton.addEventListener("click", () => {
+    resetRecording();
+    startButton.textContent = "Start Recording";
+    help.textContent = "Microphone access requires HTTPS on the live site or localhost during development.";
+  });
+
+  audioInput.addEventListener("change", () => {
+    if (audioInput.files.length && !audioInput.files[0].name.startsWith("microphone_recording_")) {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      objectUrl = null;
+      preview.hidden = true;
+      discardButton.hidden = true;
+      status.textContent = "File selected";
+      startButton.textContent = "Start Recording";
+    }
+  });
+
+  window.addEventListener("beforeunload", stopTracks);
+}
+
+document.addEventListener("DOMContentLoaded", setupMicrophoneRecorder);
