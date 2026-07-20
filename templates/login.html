@@ -1,22 +1,16 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Login | Transcript Lab</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body class="login-body">
+{% extends "base.html" %}
+{% block content %}
+<section class="auth-shell">
   <form class="login-card" method="post">
-    <h1>Transcript Lab</h1>
-    <p>Enter the app password.</p>
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% for category, message in messages %}
-        <div class="flash {{ category }}">{{ message }}</div>
-      {% endfor %}
-    {% endwith %}
-    <input type="password" name="password" placeholder="Password" autofocus>
-    <button type="submit">Login</button>
+    <h1>Welcome back</h1>
+    <p>Log in to your private ShermLabs Memory workspace.</p>
+    <label>Email</label>
+    <input type="email" name="email" autocomplete="email" required autofocus>
+    <label>Password</label>
+    <input type="password" name="password" autocomplete="current-password" required>
+    <label class="checkbox-row"><input type="checkbox" name="remember"> Keep me logged in</label>
+    <button type="submit">Log in</button>
+    <p class="auth-switch">New here? <a href="{{ url_for('register') }}">Create an account</a></p>
   </form>
-</body>
-</html>
+</section>
+{% endblock %}

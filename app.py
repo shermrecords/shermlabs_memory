@@ -8,8 +8,10 @@ from functools import wraps
 from dotenv import load_dotenv
 from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file
 from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager, UserMixin, current_user, login_user, logout_user, login_required
 from sqlalchemy import inspect, text
 from werkzeug.utils import secure_filename
+from werkzeug.security import generate_password_hash, check_password_hash
 
 
 load_dotenv(override=True)
@@ -50,7 +52,6 @@ app.config["SQLALCHEMY_DATABASE_URI"] = normalize_database_url(os.getenv("DATABA
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["MAX_CONTENT_LENGTH"] = int(os.getenv("MAX_CONTENT_MB", "100")) * 1024 * 1024
 
-APP_PASSWORD = os.getenv("APP_PASSWORD", "changeme")
 OPENAI_TRANSCRIBE_MODELS = [
     "whisper-1",
     "gpt-4o-mini-transcribe",
@@ -70,11 +71,35 @@ LOCAL_WHISPER_MODELS = ["tiny", "base", "small", "medium"]
 DEFAULT_LOCAL_WHISPER_MODEL = "base"
 
 db = SQLAlchemy(app)
+login_manager = LoginManager(app)
+login_manager.login_view = "login"
+login_manager.login_message = "Please log in to continue."
 
 
 # ---------------------------
 # Models
 # ---------------------------
+
+
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(255), unique=True, nullable=False, index=True)
+    password_hash = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def set_password(self, password: str) -> None:
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password: str) -> bool:
+        return check_password_hash(self.password_hash, password)
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    try:
+        return db.session.get(User, int(user_id))
+    except (TypeError, ValueError):
+        return None
 
 
 note_topics = db.Table(
@@ -86,6 +111,7 @@ note_topics = db.Table(
 
 class Transcript(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
     filename = db.Column(db.String(255), nullable=False)
     filepath = db.Column(db.Text, nullable=True)
     storage_key = db.Column(db.Text, nullable=True)
@@ -123,6 +149,7 @@ class Transcript(db.Model):
 
 class Topic(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
     name = db.Column(db.String(255), unique=True, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -131,6 +158,7 @@ class Topic(db.Model):
 
 class Note(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
     title = db.Column(db.String(255), nullable=False)
     body = db.Column(db.Text, nullable=False)
     source_transcript_id = db.Column(db.Integer, db.ForeignKey("transcript.id"), nullable=True)
@@ -142,15 +170,6 @@ class Note(db.Model):
 # ---------------------------
 # Helpers
 # ---------------------------
-
-def login_required(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        if not session.get("logged_in"):
-            return redirect(url_for("login"))
-        return func(*args, **kwargs)
-    return wrapper
-
 
 def safe_filename(text: str) -> str:
     text = (text or "").strip()
@@ -216,11 +235,11 @@ def get_or_create_topic(name: str) -> Topic:
     if not normalized:
         raise ValueError("Topic name cannot be empty.")
 
-    existing = Topic.query.filter(db.func.lower(Topic.name) == normalized.lower()).first()
+    existing = Topic.query.filter(Topic.user_id == current_user.id, db.func.lower(Topic.name) == normalized.lower()).first()
     if existing:
         return existing
 
-    topic = Topic(name=normalized)
+    topic = Topic(name=normalized, user_id=current_user.id)
     db.session.add(topic)
     db.session.commit()
     return topic
@@ -247,7 +266,7 @@ def save_uploaded_file(file_storage, folder: str = "uploads"):
 
     if supabase:
         try:
-            storage_key = f"{folder}/{local_name}"
+            storage_key = f"users/{current_user.id}/{folder}/{local_name}"
 
             with open(local_path, "rb") as f:
                 supabase.storage.from_(SUPABASE_BUCKET).upload(
@@ -328,150 +347,44 @@ def _parse_json_text(value, default=None):
 
 
 def analyze_entry_text(source_text: str, title: str = "") -> dict:
-    """Analyze one entry while preserving the source text exactly."""
+    """Analyze one entry with Together AI while preserving the source text."""
     api_key = os.getenv("TOGETHER_API_KEY")
     if not api_key:
         raise RuntimeError("TOGETHER_API_KEY is not configured.")
-
     try:
         from openai import OpenAI
     except ImportError as exc:
-        raise RuntimeError(
-            "Install the OpenAI package with: pip install -r requirements.txt"
-        ) from exc
+        raise RuntimeError("Install dependencies with: pip install -r requirements.txt") from exc
 
-    schema = {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "cleaned_text": {"type": "string"},
-            "summary": {"type": "string"},
-            "category": {"type": "string"},
-            "project": {"type": "string"},
-            "tags": {
-                "type": "array",
-                "items": {"type": "string"},
-            },
-            "action_items": {
-                "type": "array",
-                "items": {"type": "string"},
-            },
-            "entities": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "name": {"type": "string"},
-                        "type": {"type": "string"},
-                    },
-                    "required": ["name", "type"],
-                },
-            },
-            "confidence": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1,
-            },
-        },
-        "required": [
-            "cleaned_text",
-            "summary",
-            "category",
-            "project",
-            "tags",
-            "action_items",
-            "entities",
-            "confidence",
+    instructions = """You organize personal voice memos, pasted text, and documents into a knowledge system.
+Return only valid JSON with these keys: cleaned_text, summary, category, project, tags, action_items, entities, confidence.
+Do not invent facts. Preserve meaning and uncertainty. cleaned_text may fix punctuation, filler words, and obvious transcription errors, but must not add claims or remove meaningful details.
+summary should be concise but useful. category should be a stable broad label such as idea, project_note, research, journal, meeting, task_list, music, software, or reference.
+project should name the most likely project, or be an empty string when unclear. Tags should be specific. Action items must only include explicit or strongly implied next actions.
+Entities is an array of objects with name and type. Confidence is a number from 0 to 1."""
+
+    client = OpenAI(api_key=api_key, base_url=os.getenv("TOGETHER_BASE_URL", "https://api.together.xyz/v1"))
+    response = client.chat.completions.create(
+        model=os.getenv("TOGETHER_ANALYSIS_MODEL", "openai/gpt-oss-20b"),
+        messages=[
+            {"role": "system", "content": instructions},
+            {"role": "user", "content": f"Title: {title or '(untitled)'}\n\nSource text:\n{source_text}"},
         ],
-    }
-
-    instructions = """
-You organize personal voice memos, pasted text, and documents into a
-knowledge system.
-
-Do not invent facts. Preserve meaning and uncertainty.
-
-cleaned_text may fix punctuation, filler words, and obvious transcription
-errors, but must not add claims or remove meaningful details.
-
-summary should be concise but useful.
-
-category should be a stable broad label such as idea, project_note,
-research, journal, meeting, task_list, music, software, or reference.
-
-project should name the most likely project, or be an empty string when
-unclear.
-
-Tags should be specific.
-
-Action items must only include explicit or strongly implied next actions.
-
-Entities may include people, organizations, software, places, papers,
-products, and concepts.
-
-Confidence reflects confidence in the categorization and project assignment.
-""".strip()
-
-    user_content = f"""
-Title:
-{title or "(untitled)"}
-
-Source text:
-{source_text}
-""".strip()
-
-    client = OpenAI(
-        api_key=api_key,
-        base_url=os.getenv(
-            "TOGETHER_BASE_URL",
-            "https://api.together.xyz/v1",
-        ),
+        temperature=0.1,
+        response_format={"type": "json_object"},
     )
-
-    try:
-        response = client.chat.completions.create(
-            model=os.getenv(
-                "TOGETHER_ANALYSIS_MODEL",
-                "openai/gpt-oss-20b",
-            ),
-            messages=[
-                {
-                    "role": "system",
-                    "content": instructions,
-                },
-                {
-                    "role": "user",
-                    "content": user_content,
-                },
-            ],
-            temperature=0.1,
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "entry_analysis",
-                    "schema": schema,
-                },
-            },
-        )
-    except Exception as exc:
-        raise RuntimeError(f"Together analysis request failed: {exc}") from exc
-
-    raw_json = response.choices[0].message.content
-
-    if not raw_json:
+    raw = response.choices[0].message.content
+    if not raw:
         raise RuntimeError("Together returned an empty response.")
-
     try:
-        analysis = json.loads(raw_json)
+        analysis = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise RuntimeError(
-            f"Together returned invalid JSON:\n\n{raw_json}"
-        ) from exc
-
+        raise RuntimeError(f"Together returned invalid JSON: {raw[:500]}") from exc
+    required = {"cleaned_text", "summary", "category", "project", "tags", "action_items", "entities", "confidence"}
+    missing = required - set(analysis)
+    if missing:
+        raise RuntimeError(f"Together response is missing fields: {', '.join(sorted(missing))}")
     return analysis
-
-
 
 
 def topic_master_text(topic: Topic) -> str:
@@ -484,7 +397,7 @@ def topic_master_text(topic: Topic) -> str:
 
     notes = (
         Note.query.join(note_topics)
-        .filter(note_topics.c.topic_id == topic.id)
+        .filter(note_topics.c.topic_id == topic.id, Note.user_id == current_user.id)
         .order_by(Note.created_at.asc())
         .all()
     )
@@ -508,6 +421,7 @@ def ensure_transcript_columns():
         return
     existing = {column["name"] for column in inspector.get_columns("transcript")}
     statements = {
+        "user_id": "ALTER TABLE transcript ADD COLUMN user_id INTEGER",
         "input_type": "ALTER TABLE transcript ADD COLUMN input_type VARCHAR(30) DEFAULT 'audio' NOT NULL",
         "source_title": "ALTER TABLE transcript ADD COLUMN source_title VARCHAR(255)",
         "source_mimetype": "ALTER TABLE transcript ADD COLUMN source_mimetype VARCHAR(120)",
@@ -530,6 +444,37 @@ def ensure_transcript_columns():
     db.session.commit()
 
 
+def ensure_owner_columns():
+    """Add ownership columns to legacy MVP tables without deleting existing data."""
+    inspector = inspect(db.engine)
+    table_statements = {
+        "topic": "ALTER TABLE topic ADD COLUMN user_id INTEGER",
+        "note": "ALTER TABLE note ADD COLUMN user_id INTEGER",
+    }
+    for table_name, statement in table_statements.items():
+        if table_name in inspector.get_table_names():
+            columns = {c["name"] for c in inspector.get_columns(table_name)}
+            if "user_id" not in columns:
+                db.session.execute(text(statement))
+    db.session.commit()
+
+
+def claim_legacy_data(user_id: int) -> None:
+    """Assign pre-account records to the first registered user."""
+    Transcript.query.filter(Transcript.user_id.is_(None)).update({Transcript.user_id: user_id})
+    Topic.query.filter(Topic.user_id.is_(None)).update({Topic.user_id: user_id})
+    Note.query.filter(Note.user_id.is_(None)).update({Note.user_id: user_id})
+    db.session.commit()
+
+
+def owned_transcript_or_404(transcript_id: int):
+    return Transcript.query.filter_by(id=transcript_id, user_id=current_user.id).first_or_404()
+
+
+def owned_topic_or_404(topic_id: int):
+    return Topic.query.filter_by(id=topic_id, user_id=current_user.id).first_or_404()
+
+
 # ---------------------------
 # Routes
 # ---------------------------
@@ -545,22 +490,58 @@ def ensure_tables():
     # Fine for MVP. Later migrations can replace this.
     db.create_all()
     ensure_transcript_columns()
+    ensure_owner_columns()
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if current_user.is_authenticated:
+        return redirect(url_for("index"))
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        confirm = request.form.get("confirm_password", "")
+        if not email or "@" not in email:
+            flash("Enter a valid email address.", "error")
+        elif len(password) < 8:
+            flash("Password must be at least 8 characters.", "error")
+        elif password != confirm:
+            flash("Passwords do not match.", "error")
+        elif User.query.filter_by(email=email).first():
+            flash("An account with that email already exists.", "error")
+        else:
+            is_first_user = User.query.count() == 0
+            user = User(email=email)
+            user.set_password(password)
+            db.session.add(user)
+            db.session.commit()
+            if is_first_user:
+                claim_legacy_data(user.id)
+            login_user(user)
+            flash("Account created.", "success")
+            return redirect(url_for("index"))
+    return render_template("register.html")
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    if current_user.is_authenticated:
+        return redirect(url_for("index"))
     if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
-        if password == APP_PASSWORD:
-            session["logged_in"] = True
-            return redirect(url_for("index"))
-        flash("Wrong password.", "error")
+        user = User.query.filter_by(email=email).first()
+        if user and user.check_password(password):
+            login_user(user, remember=request.form.get("remember") == "on")
+            return redirect(request.args.get("next") or url_for("index"))
+        flash("Invalid email or password.", "error")
     return render_template("login.html")
 
 
-@app.route("/logout")
+@app.route("/logout", methods=["POST", "GET"])
+@login_required
 def logout():
-    session.clear()
+    logout_user()
     return redirect(url_for("login"))
 
 
@@ -570,7 +551,7 @@ def index():
     q = request.args.get("q", "").strip()
     status = request.args.get("status", "").strip()
 
-    query = Transcript.query
+    query = Transcript.query.filter(Transcript.user_id == current_user.id)
 
     if q:
         like = f"%{q}%"
@@ -596,7 +577,7 @@ def index():
         Transcript.created_at.desc(),
     ).all()
 
-    topics = Topic.query.order_by(Topic.name.asc()).all()
+    topics = Topic.query.filter_by(user_id=current_user.id).order_by(Topic.name.asc()).all()
 
     return render_template(
         "index.html",
@@ -608,7 +589,7 @@ def index():
 @app.route("/topic/<int:topic_id>/delete", methods=["POST"])
 @login_required
 def delete_topic(topic_id):
-    topic = Topic.query.get_or_404(topic_id)
+    topic = owned_topic_or_404(topic_id)
 
     # This deletes the topic link, but does NOT delete the notes themselves.
     topic.notes.clear()
@@ -692,6 +673,7 @@ def upload():
                     flash(f"Uploaded audio, but transcription failed: {exc}", "error")
 
         entry = Transcript(
+            user_id=current_user.id,
             filename=title,
             filepath=local_path,
             storage_key=storage_key,
@@ -727,7 +709,7 @@ def upload():
 @app.route("/transcript/<int:transcript_id>", methods=["GET", "POST"])
 @login_required
 def edit_transcript(transcript_id):
-    transcript = Transcript.query.get_or_404(transcript_id)
+    transcript = owned_transcript_or_404(transcript_id)
 
     if request.method == "POST":
         transcript.filename = request.form.get("filename", transcript.filename).strip() or transcript.filename
@@ -739,8 +721,8 @@ def edit_transcript(transcript_id):
         flash("Working copy saved.", "success")
         return redirect(url_for("edit_transcript", transcript_id=transcript.id))
 
-    topics = Topic.query.order_by(Topic.name.asc()).all()
-    notes = Note.query.filter_by(source_transcript_id=transcript.id).order_by(Note.created_at.desc()).all()
+    topics = Topic.query.filter_by(user_id=current_user.id).order_by(Topic.name.asc()).all()
+    notes = Note.query.filter_by(source_transcript_id=transcript.id, user_id=current_user.id).order_by(Note.created_at.desc()).all()
 
     return render_template(
         "transcript.html",
@@ -756,7 +738,7 @@ def edit_transcript(transcript_id):
 @app.route("/transcript/<int:transcript_id>/analyze", methods=["POST"])
 @login_required
 def analyze_transcript(transcript_id):
-    transcript = Transcript.query.get_or_404(transcript_id)
+    transcript = owned_transcript_or_404(transcript_id)
     source_text = (transcript.transcript_working or transcript.transcript_original or "").strip()
     if not source_text:
         flash("There is no text to analyze yet.", "error")
@@ -795,7 +777,7 @@ def analyze_transcript(transcript_id):
 @app.route("/transcript/<int:transcript_id>/ai-review", methods=["POST"])
 @login_required
 def review_ai_analysis(transcript_id):
-    transcript = Transcript.query.get_or_404(transcript_id)
+    transcript = owned_transcript_or_404(transcript_id)
     action = request.form.get("action", "save")
 
     transcript.cleaned_text = request.form.get("cleaned_text", transcript.cleaned_text or "").strip()
@@ -827,7 +809,7 @@ def review_ai_analysis(transcript_id):
 @app.route("/transcript/<int:transcript_id>/create-note", methods=["POST"])
 @login_required
 def create_note_from_transcript(transcript_id):
-    transcript = Transcript.query.get_or_404(transcript_id)
+    transcript = owned_transcript_or_404(transcript_id)
 
     title = request.form.get("note_title", "").strip()
     body = request.form.get("note_body", "").strip()
@@ -852,7 +834,7 @@ def create_note_from_transcript(transcript_id):
     topics = []
 
     for topic_id in topic_ids:
-        topic = Topic.query.get(int(topic_id))
+        topic = Topic.query.filter_by(id=int(topic_id), user_id=current_user.id).first()
         if topic:
             topics.append(topic)
 
@@ -866,6 +848,7 @@ def create_note_from_transcript(transcript_id):
         return redirect(url_for("edit_transcript", transcript_id=transcript.id))
 
     note = Note(
+        user_id=current_user.id,
         title=title,
         body=body,
         source_transcript_id=transcript.id,
@@ -889,10 +872,10 @@ def create_note_from_transcript(transcript_id):
 @app.route("/topic/<int:topic_id>")
 @login_required
 def view_topic(topic_id):
-    topic = Topic.query.get_or_404(topic_id)
+    topic = owned_topic_or_404(topic_id)
     notes = (
         Note.query.join(note_topics)
-        .filter(note_topics.c.topic_id == topic.id)
+        .filter(note_topics.c.topic_id == topic.id, Note.user_id == current_user.id)
         .order_by(Note.created_at.asc())
         .all()
     )
@@ -902,7 +885,7 @@ def view_topic(topic_id):
 @app.route("/topic/<int:topic_id>/export")
 @login_required
 def export_topic(topic_id):
-    topic = Topic.query.get_or_404(topic_id)
+    topic = owned_topic_or_404(topic_id)
     text = topic_master_text(topic)
     output_path = EXPORT_DIR / f"{safe_filename(topic.name)}_master.txt"
     output_path.write_text(text, encoding="utf-8")
@@ -912,7 +895,7 @@ def export_topic(topic_id):
 @app.route("/transcript/<int:transcript_id>/delete", methods=["POST"])
 @login_required
 def delete_transcript(transcript_id):
-    transcript = Transcript.query.get_or_404(transcript_id)
+    transcript = owned_transcript_or_404(transcript_id)
     db.session.delete(transcript)
     db.session.commit()
     flash("Transcript deleted.", "success")

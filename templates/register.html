@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="auth-shell">
+  <form class="login-card" method="post">
+    <h1>Create account</h1>
+    <p>Your entries, notes, topics, and uploads stay separated from other users.</p>
+    <label>Email</label>
+    <input type="email" name="email" autocomplete="email" required autofocus>
+    <label>Password</label>
+    <input type="password" name="password" minlength="8" autocomplete="new-password" required>
+    <label>Confirm password</label>
+    <input type="password" name="confirm_password" minlength="8" autocomplete="new-password" required>
+    <button type="submit">Create account</button>
+    <p class="auth-switch">Already registered? <a href="{{ url_for('login') }}">Log in</a></p>
+  </form>
+</section>
+{% endblock %}

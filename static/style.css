@@ -591,3 +591,11 @@ code {
 }
 .analysis-meta { display: flex; justify-content: space-between; color: var(--muted); }
 .danger-button { border-color: var(--danger); }
+
+.auth-shell { min-height: 75vh; display: grid; place-items: center; }
+.login-card { width: min(440px, 92vw); display: grid; gap: 12px; padding: 28px; border-radius: 18px; background: var(--panel, #151a24); box-shadow: 0 20px 60px rgba(0,0,0,.28); }
+.login-card input { width: 100%; box-sizing: border-box; }
+.checkbox-row { display: flex; gap: 8px; align-items: center; }
+.checkbox-row input { width: auto; }
+.auth-switch { margin: 6px 0 0; text-align: center; }
+.user-email { opacity: .7; font-size: .9rem; }
