@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="panel">
+
+  <div class="editor-head">
+    <div>
+      <h1>{{ topic.name }}</h1>
+      <p class="muted">{{ notes|length }} note(s)</p>
+    </div>
+
+    <div style="display:flex; gap:10px; align-items:center;">
+
+      <a class="button primary"
+         href="{{ url_for('export_topic', topic_id=topic.id) }}">
+         Export Master .txt
+      </a>
+
+      <form method="POST"
+            action="{{ url_for('delete_topic', topic_id=topic.id) }}"
+            onsubmit="return confirm('Delete this topic? Notes will remain saved, but this topic label will be removed.');">
+
+        <button type="submit"
+          Delete Topic
+        </button>
+
+      </form>
+
+    </div>
+  </div>
+
+  <textarea readonly rows="28">{{ master_text }}</textarea>
+
+</section>
+{% endblock %}

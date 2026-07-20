@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <div>
+    <h1>Dashboard</h1>
+    <p>Capture, review, and organize audio, text, and documents in one searchable workspace.</p>
+  </div>
+
+  <div class="hero-actions capture-actions">
+    <a class="button primary" href="{{ url_for('upload', type='audio') }}">🎤 Audio</a>
+    <a class="button" href="{{ url_for('upload', type='text') }}">📄 Paste Text</a>
+    <a class="button" href="{{ url_for('upload', type='document') }}">📁 Document</a>
+  </div>
+</section>
+
+<div class="stats-grid">
+  <div class="stat-card">
+    <span>Unread</span>
+    <strong>{{ transcripts|selectattr("review_status","equalto","unread")|list|length }}</strong>
+  </div>
+
+  <div class="stat-card">
+    <span>In Progress</span>
+    <strong>{{ transcripts|selectattr("review_status","equalto","in_progress")|list|length }}</strong>
+  </div>
+
+  <div class="stat-card">
+    <span>Complete</span>
+    <strong>{{ transcripts|selectattr("review_status","equalto","complete")|list|length }}</strong>
+  </div>
+
+  <div class="stat-card">
+    <span>Topics</span>
+    <strong>{{ topics|length }}</strong>
+  </div>
+</div>
+
+<form class="filters" method="get">
+  <input name="q" value="{{ q }}" placeholder="Search all entries...">
+
+  <select name="status">
+    <option value="">All statuses</option>
+    <option value="unread" {% if status == "unread" %}selected{% endif %}>Unread</option>
+    <option value="in_progress" {% if status == "in_progress" %}selected{% endif %}>In progress</option>
+    <option value="complete" {% if status == "complete" %}selected{% endif %}>Complete</option>
+  </select>
+
+  <button type="submit">Search</button>
+</form>
+
+<div class="grid-two dashboard-grid">
+  <section class="panel">
+    <div class="section-head">
+      <div>
+        <h2>Entries</h2>
+        <p class="muted">Unread and in-progress items appear first.</p>
+      </div>
+    </div>
+
+    {% if transcripts %}
+      <div class="list">
+        {% for t in transcripts %}
+          <a class="list-item transcript-card" href="{{ url_for('edit_transcript', transcript_id=t.id) }}">
+            <div>
+              <strong>
+                {% if t.review_status == "complete" %}✓{% elif t.review_status == "in_progress" %}◐{% else %}●{% endif %}
+                {{ t.filename }}
+              </strong>
+              <span class="entry-type">{% if t.input_type == "text" %}📄 Text{% elif t.input_type == "document" %}📁 Document{% else %}🎤 Audio{% endif %}</span>
+              <span>
+                {{ t.review_status }}
+                {% if t.recording_date %} · {{ t.recording_date }}{% endif %}
+                {% if t.weekday %} · {{ t.weekday }}{% endif %}
+                {% if t.recording_time %} · {{ t.recording_time }}{% endif %}
+              </span>
+            </div>
+
+            <span class="pill {{ t.review_status }}">{{ t.review_status }}</span>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">No entries yet. Capture audio, paste text, or upload a document.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="section-head">
+      <div>
+        <h2>Topics</h2>
+        <p class="muted">Topic master files built from notes.</p>
+      </div>
+    </div>
+
+    {% if topics %}
+      <div class="list">
+        {% for topic in topics %}
+          <a class="list-item" href="{{ url_for('view_topic', topic_id=topic.id) }}">
+            <strong>{{ topic.name }}</strong>
+            <span>{{ topic.notes|length }} note(s)</span>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">No topics yet. Create the first topic from a selected transcript chunk.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="editor-layout">
+  <div class="panel transcript-panel">
+    <div class="editor-head">
+      <div>
+        <h1>Edit Working Copy</h1>
+        <p class="muted">Original stays untouched. This working copy is your review queue.</p>
+      </div>
+      <span class="pill {{ transcript.review_status }}">{{ transcript.review_status }}</span>
+    </div>
+
+    <form method="post" class="form-stack">
+      <label>
+        Title
+        <input name="filename" value="{{ transcript.filename }}">
+      </label>
+
+      <div class="meta">
+        <span>Original file: {{ transcript.original_filename or "—" }}</span>
+        <span>Date: {{ transcript.recording_date or "—" }}</span>
+        <span>{{ transcript.weekday or "—" }} {{ transcript.recording_time or "" }}</span>
+      </div>
+
+      <label>
+        Review status
+        <select name="review_status">
+          <option value="unread" {% if transcript.review_status == "unread" %}selected{% endif %}>unread</option>
+          <option value="in_progress" {% if transcript.review_status == "in_progress" %}selected{% endif %}>in_progress</option>
+          <option value="complete" {% if transcript.review_status == "complete" %}selected{% endif %}>complete</option>
+        </select>
+      </label>
+
+      <div class="tool-section">
+        <div class="tool-title">Voice</div>
+
+        <div class="tool-grid">
+          <label>
+            Voice
+            <select id="speechVoice"></select>
+          </label>
+
+          <label>
+            Speed
+            <select id="speechRate">
+              <option value="0.5">Very Slow</option>
+              <option value="0.7">Slow</option>
+              <option value="0.8" selected>Comfortable</option>
+              <option value="1.0">Normal</option>
+              <option value="1.2">Fast</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="tts-controls">
+          <button type="button" onclick="speakWorkingCopy()">Read All</button>
+          <button type="button" onclick="speakFromCursor()">Read From Cursor</button>
+          <button type="button" onclick="speakSelection()">Read Selection</button>
+          <button type="button" onclick="pauseSpeech()">Pause</button>
+          <button type="button" onclick="resumeSpeech()">Resume</button>
+          <button type="button" onclick="stopSpeech()">Stop</button>
+        </div>
+      </div>
+
+      <div class="tool-section">
+        <div class="tool-title">Cleanup</div>
+
+        <div class="button-row">
+          <button type="button" onclick="cleanForListening()">Clean For Listening</button>
+          <button type="button" onclick="removeParentheses()">Remove (...)</button>
+          <button type="button" onclick="removeSquareBrackets()">Remove [...]</button>
+        </div>
+      </div>
+
+      <div class="tool-section">
+        <div class="tool-title">Writing</div>
+
+        <div class="button-row">
+          <button type="button" onclick="lookupSynonyms()">Synonyms</button>
+        </div>
+
+        <div id="synonymBox" class="synonym-box" style="display:none;"></div>
+      </div>
+
+      <label>
+        Working copy
+        <textarea id="workingCopy" name="transcript_working" rows="24">{{ transcript.transcript_working }}</textarea>
+      </label>
+
+      <button type="submit" class="primary">Save Working Copy</button>
+    </form>
+
+    <details class="original-box">
+      <summary>View original transcript</summary>
+      <pre>{{ transcript.transcript_original }}</pre>
+    </details>
+
+    <section class="ai-panel">
+      <div class="editor-head">
+        <div>
+          <h2>AI Analysis</h2>
+          <p class="muted">Separate from your source text. Review everything before approving it.</p>
+        </div>
+        <span class="pill {{ transcript.processing_status }}">{{ transcript.processing_status or "not_analyzed" }}</span>
+      </div>
+
+      {% if transcript.processing_error %}
+        <div class="flash error">{{ transcript.processing_error }}</div>
+      {% endif %}
+
+      <form method="post" action="{{ url_for('analyze_transcript', transcript_id=transcript.id) }}">
+        <button type="submit" class="primary">{% if transcript.ai_summary %}Analyze Again{% else %}Analyze with AI{% endif %}</button>
+      </form>
+
+      {% if transcript.ai_summary or transcript.cleaned_text %}
+        <form method="post" action="{{ url_for('review_ai_analysis', transcript_id=transcript.id) }}" class="form-stack ai-review-form">
+          <label>
+            Cleaned text
+            <textarea name="cleaned_text" rows="16">{{ transcript.cleaned_text or "" }}</textarea>
+          </label>
+
+          <label>
+            Summary
+            <textarea name="ai_summary" rows="4">{{ transcript.ai_summary or "" }}</textarea>
+          </label>
+
+          <div class="tool-grid">
+            <label>
+              Category
+              <input name="ai_category" value="{{ transcript.ai_category or '' }}">
+            </label>
+            <label>
+              Suggested project
+              <input name="ai_project" value="{{ transcript.ai_project or '' }}">
+            </label>
+          </div>
+
+          <label>
+            Tags <span class="muted">(comma separated)</span>
+            <input name="ai_tags" value="{{ ai_tags | join(', ') }}">
+          </label>
+
+          <label>
+            Action items <span class="muted">(one per line)</span>
+            <textarea name="ai_action_items" rows="6">{{ ai_action_items | join('
+') }}</textarea>
+          </label>
+
+          {% if ai_entities %}
+            <div class="entity-box">
+              <strong>Detected entities</strong>
+              <div class="tag-row">
+                {% for entity in ai_entities %}
+                  <span class="tag-chip">{{ entity.name }} · {{ entity.type }}</span>
+                {% endfor %}
+              </div>
+            </div>
+          {% endif %}
+
+          <div class="analysis-meta">
+            <span>Confidence: {% if transcript.ai_confidence is not none %}{{ "%.0f"|format(transcript.ai_confidence * 100) }}%{% else %}—{% endif %}</span>
+            <span>Review: {{ transcript.ai_review_status or "pending" }}</span>
+          </div>
+
+          <div class="button-row">
+            <button type="submit" name="action" value="save">Save Edits</button>
+            <button type="submit" name="action" value="approve" class="primary">Approve Analysis</button>
+            <button type="submit" name="action" value="reject" class="danger-button">Reject</button>
+          </div>
+        </form>
+      {% endif %}
+    </section>
+  </div>
+
+  <aside class="panel note-panel">
+    <h2>New Note From Selection</h2>
+    <p class="muted">Highlight text in the working copy, then click “Use Selection.”</p>
+
+    <button type="button" onclick="copySelectionToNote()">Use Selection</button>
+
+    <form method="post" action="{{ url_for('create_note_from_transcript', transcript_id=transcript.id) }}" class="form-stack note-form">
+      <label>
+        Note / topic name
+        <input name="note_title" id="noteTitle" placeholder="first mushroom experience">
+      </label>
+
+      <label>
+        Note body
+        <textarea name="note_body" id="noteBody" rows="9"></textarea>
+      </label>
+
+      <div class="topic-checks">
+        <strong>Existing topics</strong>
+        {% if topics %}
+          {% for topic in topics %}
+            <label class="check-row">
+              <input type="checkbox" name="topic_ids" value="{{ topic.id }}">
+              {{ topic.name }}
+            </label>
+          {% endfor %}
+        {% else %}
+          <p class="muted">No topics yet.</p>
+        {% endif %}
+      </div>
+
+      <label>
+        Create new topic
+        <input name="new_topic" placeholder="Leave blank unless creating a new topic">
+      </label>
+
+      <label class="check-row">
+        <input type="checkbox" name="remove_from_working" checked>
+        Remove this exact chunk from working copy
+      </label>
+
+      <button type="submit" class="primary">Save Note</button>
+    </form>
+
+    <hr>
+
+    <h2>Notes from this transcript</h2>
+    {% if notes %}
+      <div class="list small-list">
+        {% for note in notes %}
+          <div class="list-item">
+            <strong>{{ note.title }}</strong>
+            <span>{{ note.created_at.strftime("%Y-%m-%d %H:%M") }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">No notes yet.</p>
+    {% endif %}
+  </aside>
+</section>
+{% endblock %}

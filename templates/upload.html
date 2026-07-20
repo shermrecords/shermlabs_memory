@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel narrow capture-panel">
+  <div class="section-head">
+    <div>
+      <h1>Add New Entry</h1>
+      <p class="muted">Capture audio, paste text, or upload a document. Every source enters the same review workflow.</p>
+    </div>
+  </div>
+
+  <div class="capture-tabs" role="tablist" aria-label="Entry type">
+    <button type="button" class="capture-tab" data-capture-type="audio">🎤 Audio</button>
+    <button type="button" class="capture-tab" data-capture-type="text">📄 Paste Text</button>
+    <button type="button" class="capture-tab" data-capture-type="document">📁 Document</button>
+  </div>
+
+  <form method="post" enctype="multipart/form-data" class="form-stack" data-loading="upload" id="captureForm">
+    <input type="hidden" name="input_type" id="inputType" value="{{ selected_type }}">
+
+    <label>
+      Title <span class="muted">(optional)</span>
+      <input name="title" placeholder="The app will create one when left blank">
+    </label>
+
+    <div class="capture-section" data-section="audio">
+      <label>
+        Audio file
+        <input type="file" name="audio" accept="audio/*,video/mp4">
+      </label>
+
+      <label>
+        Recording date
+        <input type="date" name="recording_date" value="{{ today }}">
+      </label>
+
+      <label for="transcribe_model">
+        Local Whisper model
+        <select name="transcribe_model" id="transcribe_model">
+          {% for model in transcribe_models %}
+            <option value="{{ model }}" {% if model == default_transcribe_model %}selected{% endif %}>{{ model }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label class="check-row">
+        <input type="checkbox" name="transcribe" checked>
+        Transcribe after upload
+      </label>
+
+      <label>
+        Existing transcript <span class="muted">(optional)</span>
+        <textarea name="manual_transcript" rows="7" placeholder="Paste an existing transcript to skip transcription."></textarea>
+      </label>
+    </div>
+
+    <div class="capture-section" data-section="text">
+      <label>
+        Text
+        <textarea name="pasted_text" rows="18" placeholder="Paste notes, ideas, emails, research fragments, journal entries, or anything else you want stored and organized."></textarea>
+      </label>
+    </div>
+
+    <div class="capture-section" data-section="document">
+      <label>
+        Document
+        <input type="file" name="document" accept=".txt,.md,.docx,.pdf,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+      </label>
+      <p class="muted source-note">Supported now: TXT, Markdown, DOCX, and text-based PDF. Scanned PDFs will need OCR in a later pass.</p>
+    </div>
+
+    <button type="submit" class="primary" id="captureSubmit">Create Entry</button>
+  </form>
+</section>
+
+<script>
+(() => {
+  const initialType = {{ selected_type|tojson }};
+  const inputType = document.getElementById("inputType");
+  const tabs = [...document.querySelectorAll("[data-capture-type]")];
+  const sections = [...document.querySelectorAll("[data-section]")];
+
+  function selectType(type) {
+    inputType.value = type;
+    tabs.forEach(tab => tab.classList.toggle("active", tab.dataset.captureType === type));
+    sections.forEach(section => {
+      const active = section.dataset.section === type;
+      section.hidden = !active;
+      section.querySelectorAll("input, textarea, select").forEach(field => field.disabled = !active);
+    });
+  }
+
+  tabs.forEach(tab => tab.addEventListener("click", () => selectType(tab.dataset.captureType)));
+  selectType(initialType);
+})();
+</script>
+{% endblock %}
