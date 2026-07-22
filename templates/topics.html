@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <div><h1>Topics</h1><p>Browse the knowledge areas created from analyzed entries and saved notes.</p></div>
+</section>
+<form class="filters" method="get">
+  <input name="q" value="{{ q }}" placeholder="Search topic names...">
+  <button type="submit">Search</button>
+  {% if q %}<a class="button" href="{{ url_for('topics_index') }}">Clear</a>{% endif %}
+</form>
+<section class="panel">
+  {% if topics %}
+    <div class="topic-card-grid">
+      {% for topic in topics %}
+        <a class="topic-card" href="{{ url_for('view_topic', topic_id=topic.id) }}">
+          <h2>{{ topic.name }}</h2>
+          <p>{{ topic.entries|length }} linked entr{{ 'y' if topic.entries|length == 1 else 'ies' }} · {{ topic.notes|length }} note{{ '' if topic.notes|length == 1 else 's' }}</p>
+          {% if topic.entries %}<span>{{ topic.entries[0].ai_summary or topic.entries[0].filename }}</span>{% endif %}
+        </a>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted">No matching topics.</p>
+  {% endif %}
+</section>
+{% endblock %}

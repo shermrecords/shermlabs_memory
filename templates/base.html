@@ -5,6 +5,14 @@
   <title>{{ title or "ShermLabs Memory" }}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <!-- Favicons -->
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32"
+        href="{{ url_for('static', filename='favicon-32x32.png') }}">
+  <link rel="icon" type="image/png" sizes="16x16"
+        href="{{ url_for('static', filename='favicon-16x16.png') }}">
+  <link rel="apple-touch-icon"
+        href="{{ url_for('static', filename='apple-touch-icon.png') }}">
 </head>
 <body>
   {% if current_user.is_authenticated %}
@@ -12,6 +20,7 @@
     <a class="brand" href="{{ url_for('index') }}">ShermLabs Memory</a>
     <nav>
       <a href="{{ url_for('index') }}">Dashboard</a>
+      <a href="{{ url_for('topics_index') }}">Topics</a>
       <a href="{{ url_for('upload', type='audio') }}">Audio</a>
       <a href="{{ url_for('upload', type='text') }}">Paste Text</a>
       <a href="{{ url_for('upload', type='document') }}">Document</a>

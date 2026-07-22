@@ -90,8 +90,13 @@
       <button type="submit" class="primary">Save Working Copy</button>
     </form>
 
-    <details class="original-box">
-      <summary>View original transcript</summary>
+    <div class="source-link-bar">
+      <span>Need to verify the AI output against the source?</span>
+      <a class="button" href="{{ url_for('original_transcript', transcript_id=transcript.id) }}">Open Original Transcript</a>
+    </div>
+
+    <details class="original-box" id="original-transcript">
+      <summary>Quick preview of original transcript</summary>
       <pre>{{ transcript.transcript_original }}</pre>
     </details>
 
@@ -156,6 +161,41 @@
               </div>
             </div>
           {% endif %}
+
+          <div class="topic-review-box">
+            <div class="section-head">
+              <div>
+                <strong>Attach this entry to topics</strong>
+                <p class="muted">Reuse existing topics, create new ones, or do both. Saving replaces the entry's current topic links.</p>
+              </div>
+              <a href="{{ url_for('topics_index') }}">Browse topics</a>
+            </div>
+
+            {% set suggested_existing = analysis_data.get('suggested_existing_topics', []) %}
+            {% if suggested_existing %}
+              <p class="suggestion-label">AI suggested existing topics</p>
+            {% endif %}
+            <div class="topic-check-grid">
+              {% for topic in topics %}
+                <label class="check-row topic-choice {% if topic.name in suggested_existing %}suggested{% endif %}">
+                  <input type="checkbox" name="entry_topic_ids" value="{{ topic.id }}"
+                    {% if topic.id in attached_topic_ids or topic.name in suggested_existing %}checked{% endif %}>
+                  <span>{{ topic.name }}{% if topic.name in suggested_existing %} <em>AI suggestion</em>{% endif %}</span>
+                </label>
+              {% endfor %}
+            </div>
+
+            <label>
+              New topics <span class="muted">(one per line; edit or remove AI suggestions)</span>
+              <textarea name="new_topic_names" rows="4">{{ analysis_data.get('suggested_new_topics', []) | join('
+') }}</textarea>
+            </label>
+          </div>
+
+          <div class="analysis-source-link">
+            <span>AI content should always be traceable to its source.</span>
+            <a href="{{ url_for('original_transcript', transcript_id=transcript.id) }}">View Original Transcript</a>
+          </div>
 
           <div class="analysis-meta">
             <span>Confidence: {% if transcript.ai_confidence is not none %}{{ "%.0f"|format(transcript.ai_confidence * 100) }}%{% else %}—{% endif %}</span>

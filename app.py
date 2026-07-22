@@ -108,6 +108,12 @@ note_topics = db.Table(
     db.Column("topic_id", db.Integer, db.ForeignKey("topic.id"), primary_key=True),
 )
 
+entry_topics = db.Table(
+    "entry_topics",
+    db.Column("entry_id", db.Integer, db.ForeignKey("transcript.id"), primary_key=True),
+    db.Column("topic_id", db.Integer, db.ForeignKey("topic.id"), primary_key=True),
+)
+
 
 class Transcript(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -145,15 +151,18 @@ class Transcript(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     notes = db.relationship("Note", backref="source_transcript", lazy=True)
+    topics = db.relationship("Topic", secondary=entry_topics, back_populates="entries")
 
 
 class Topic(db.Model):
+    __table_args__ = (db.UniqueConstraint("user_id", "name", name="uq_topic_user_name"),)
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
-    name = db.Column(db.String(255), unique=True, nullable=False)
+    name = db.Column(db.String(255), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     notes = db.relationship("Note", secondary=note_topics, back_populates="topics")
+    entries = db.relationship("Transcript", secondary=entry_topics, back_populates="topics")
 
 
 class Note(db.Model):
@@ -346,8 +355,8 @@ def _parse_json_text(value, default=None):
         return default
 
 
-def analyze_entry_text(source_text: str, title: str = "") -> dict:
-    """Analyze one entry with Together AI while preserving the source text."""
+def analyze_entry_text(source_text: str, title: str = "", existing_topics=None) -> dict:
+    """Analyze one entry and suggest existing and new topics."""
     api_key = os.getenv("TOGETHER_API_KEY")
     if not api_key:
         raise RuntimeError("TOGETHER_API_KEY is not configured.")
@@ -356,19 +365,22 @@ def analyze_entry_text(source_text: str, title: str = "") -> dict:
     except ImportError as exc:
         raise RuntimeError("Install dependencies with: pip install -r requirements.txt") from exc
 
+    existing_topics = existing_topics or []
+    topic_list = "\n".join(f"- {name}" for name in existing_topics) or "(none yet)"
     instructions = """You organize personal voice memos, pasted text, and documents into a knowledge system.
-Return only valid JSON with these keys: cleaned_text, summary, category, project, tags, action_items, entities, confidence.
+Return only valid JSON with these keys: cleaned_text, summary, category, project, tags, action_items, entities, confidence, suggested_existing_topics, suggested_new_topics.
 Do not invent facts. Preserve meaning and uncertainty. cleaned_text may fix punctuation, filler words, and obvious transcription errors, but must not add claims or remove meaningful details.
 summary should be concise but useful. category should be a stable broad label such as idea, project_note, research, journal, meeting, task_list, music, software, or reference.
 project should name the most likely project, or be an empty string when unclear. Tags should be specific. Action items must only include explicit or strongly implied next actions.
-Entities is an array of objects with name and type. Confidence is a number from 0 to 1."""
+Entities is an array of objects with name and type. Confidence is a number from 0 to 1.
+For topics, reuse existing topics whenever they fit. suggested_existing_topics must contain exact names from the supplied existing-topic list. suggested_new_topics should contain at most 3 genuinely useful new topic names and should avoid near-duplicates, overly narrow labels, and one-off keywords."""
 
     client = OpenAI(api_key=api_key, base_url=os.getenv("TOGETHER_BASE_URL", "https://api.together.xyz/v1"))
     response = client.chat.completions.create(
         model=os.getenv("TOGETHER_ANALYSIS_MODEL", "openai/gpt-oss-20b"),
         messages=[
             {"role": "system", "content": instructions},
-            {"role": "user", "content": f"Title: {title or '(untitled)'}\n\nSource text:\n{source_text}"},
+            {"role": "user", "content": f"Existing topics:\n{topic_list}\n\nTitle: {title or '(untitled)'}\n\nSource text:\n{source_text}"},
         ],
         temperature=0.1,
         response_format={"type": "json_object"},
@@ -380,7 +392,7 @@ Entities is an array of objects with name and type. Confidence is a number from 
         analysis = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Together returned invalid JSON: {raw[:500]}") from exc
-    required = {"cleaned_text", "summary", "category", "project", "tags", "action_items", "entities", "confidence"}
+    required = {"cleaned_text", "summary", "category", "project", "tags", "action_items", "entities", "confidence", "suggested_existing_topics", "suggested_new_topics"}
     missing = required - set(analysis)
     if missing:
         raise RuntimeError(f"Together response is missing fields: {', '.join(sorted(missing))}")
@@ -388,29 +400,13 @@ Entities is an array of objects with name and type. Confidence is a number from 
 
 
 def topic_master_text(topic: Topic) -> str:
-    lines = [
-        f"Topic: {topic.name}",
-        f"Exported: {datetime.utcnow().isoformat(timespec='seconds')} UTC",
-        "=" * 70,
-        "",
-    ]
-
-    notes = (
-        Note.query.join(note_topics)
-        .filter(note_topics.c.topic_id == topic.id, Note.user_id == current_user.id)
-        .order_by(Note.created_at.asc())
-        .all()
-    )
-
+    lines = [f"Topic: {topic.name}", f"Exported: {datetime.utcnow().isoformat(timespec='seconds')} UTC", "=" * 70, ""]
+    entries = (Transcript.query.join(entry_topics).filter(entry_topics.c.topic_id == topic.id, Transcript.user_id == current_user.id).order_by(Transcript.created_at.asc()).all())
+    for entry in entries:
+        lines.extend([f"Entry: {entry.filename}", f"Created: {entry.created_at.isoformat(timespec='seconds')} UTC", f"Summary: {entry.ai_summary or '(no summary)'}", "Original transcript:", entry.transcript_original or "(empty)", ""])
+    notes = (Note.query.join(note_topics).filter(note_topics.c.topic_id == topic.id, Note.user_id == current_user.id).order_by(Note.created_at.asc()).all())
     for note in notes:
-        lines.extend([
-            f"Note: {note.title}",
-            f"Created: {note.created_at.isoformat(timespec='seconds')} UTC",
-            "-" * 70,
-            note.body,
-            "",
-        ])
-
+        lines.extend([f"Note: {note.title}", f"Created: {note.created_at.isoformat(timespec='seconds')} UTC", "-" * 70, note.body, ""])
     return "\n".join(lines)
 
 
@@ -561,6 +557,10 @@ def index():
                 Transcript.original_filename.ilike(like),
                 Transcript.transcript_original.ilike(like),
                 Transcript.transcript_working.ilike(like),
+                Transcript.cleaned_text.ilike(like),
+                Transcript.ai_summary.ilike(like),
+                Transcript.ai_tags.ilike(like),
+                Transcript.ai_project.ilike(like),
             )
         )
 
@@ -593,12 +593,13 @@ def delete_topic(topic_id):
 
     # This deletes the topic link, but does NOT delete the notes themselves.
     topic.notes.clear()
+    topic.entries.clear()
 
     db.session.delete(topic)
     db.session.commit()
 
     flash(f"Deleted topic: {topic.name}", "success")
-    return redirect(url_for("index"))
+    return redirect(url_for("topics_index"))
 
 
 @app.route("/upload", methods=["GET", "POST"])
@@ -732,6 +733,8 @@ def edit_transcript(transcript_id):
         ai_tags=_parse_json_text(transcript.ai_tags),
         ai_action_items=_parse_json_text(transcript.ai_action_items),
         ai_entities=_parse_json_text(transcript.ai_entities),
+        analysis_data=_parse_json_text(transcript.ai_analysis_json, {}),
+        attached_topic_ids={topic.id for topic in transcript.topics},
     )
 
 
@@ -749,7 +752,8 @@ def analyze_transcript(transcript_id):
     db.session.commit()
 
     try:
-        analysis = analyze_entry_text(source_text, transcript.filename)
+        existing_topic_names = [t.name for t in Topic.query.filter_by(user_id=current_user.id).order_by(Topic.name.asc()).all()]
+        analysis = analyze_entry_text(source_text, transcript.filename, existing_topic_names)
         transcript.cleaned_text = analysis.get("cleaned_text", "").strip()
         transcript.ai_summary = analysis.get("summary", "").strip()
         transcript.ai_category = analysis.get("category", "").strip()
@@ -779,28 +783,32 @@ def analyze_transcript(transcript_id):
 def review_ai_analysis(transcript_id):
     transcript = owned_transcript_or_404(transcript_id)
     action = request.form.get("action", "save")
-
     transcript.cleaned_text = request.form.get("cleaned_text", transcript.cleaned_text or "").strip()
     transcript.ai_summary = request.form.get("ai_summary", transcript.ai_summary or "").strip()
     transcript.ai_category = request.form.get("ai_category", transcript.ai_category or "").strip()
     transcript.ai_project = request.form.get("ai_project", transcript.ai_project or "").strip()
-
     tags = [x.strip() for x in request.form.get("ai_tags", "").split(",") if x.strip()]
     actions = [x.strip() for x in request.form.get("ai_action_items", "").splitlines() if x.strip()]
     transcript.ai_tags = _json_text(tags)
     transcript.ai_action_items = _json_text(actions)
-
+    selected_topics = []
+    for topic_id in request.form.getlist("entry_topic_ids"):
+        topic = Topic.query.filter_by(id=int(topic_id), user_id=current_user.id).first()
+        if topic:
+            selected_topics.append(topic)
+    new_names = [x.strip() for x in request.form.get("new_topic_names", "").splitlines() if x.strip()]
+    for name in new_names:
+        selected_topics.append(get_or_create_topic(name))
+    transcript.topics = list({topic.id: topic for topic in selected_topics}.values())
+    analysis_data = _parse_json_text(transcript.ai_analysis_json, {})
+    analysis_data.update({"cleaned_text": transcript.cleaned_text, "summary": transcript.ai_summary, "category": transcript.ai_category, "project": transcript.ai_project, "tags": tags, "action_items": actions, "approved_topics": [topic.name for topic in transcript.topics]})
+    transcript.ai_analysis_json = json.dumps(analysis_data, ensure_ascii=False, indent=2)
     if action == "approve":
-        transcript.ai_review_status = "approved"
-        transcript.processing_status = "approved"
-        flash("AI analysis approved.", "success")
+        transcript.ai_review_status = "approved"; transcript.processing_status = "approved"; flash("AI analysis and topic links approved.", "success")
     elif action == "reject":
-        transcript.ai_review_status = "rejected"
-        flash("AI analysis marked rejected. The original entry was not changed.", "success")
+        transcript.ai_review_status = "rejected"; flash("AI analysis marked rejected. The original entry was not changed.", "success")
     else:
-        transcript.ai_review_status = "edited"
-        flash("AI analysis edits saved.", "success")
-
+        transcript.ai_review_status = "edited"; flash("AI analysis and topic links saved.", "success")
     transcript.updated_at = datetime.utcnow()
     db.session.commit()
     return redirect(url_for("edit_transcript", transcript_id=transcript.id))
@@ -869,17 +877,36 @@ def create_note_from_transcript(transcript_id):
     return redirect(url_for("edit_transcript", transcript_id=transcript.id))
 
 
+@app.route("/topics")
+@login_required
+def topics_index():
+    q = request.args.get("q", "").strip()
+    query = Topic.query.filter_by(user_id=current_user.id)
+    if q:
+        query = query.filter(Topic.name.ilike(f"%{q}%"))
+    topics = query.order_by(Topic.name.asc()).all()
+    return render_template("topics.html", topics=topics, q=q)
+
+@app.route("/transcript/<int:transcript_id>/original")
+@login_required
+def original_transcript(transcript_id):
+    transcript = owned_transcript_or_404(transcript_id)
+    return render_template("original.html", transcript=transcript)
+
 @app.route("/topic/<int:topic_id>")
 @login_required
 def view_topic(topic_id):
     topic = owned_topic_or_404(topic_id)
-    notes = (
-        Note.query.join(note_topics)
-        .filter(note_topics.c.topic_id == topic.id, Note.user_id == current_user.id)
-        .order_by(Note.created_at.asc())
-        .all()
-    )
-    return render_template("topic.html", topic=topic, notes=notes, master_text=topic_master_text(topic))
+    q = request.args.get("q", "").strip()
+    entries_query = Transcript.query.join(entry_topics).filter(entry_topics.c.topic_id == topic.id, Transcript.user_id == current_user.id)
+    notes_query = Note.query.join(note_topics).filter(note_topics.c.topic_id == topic.id, Note.user_id == current_user.id)
+    if q:
+        like = f"%{q}%"
+        entries_query = entries_query.filter(db.or_(Transcript.filename.ilike(like), Transcript.ai_summary.ilike(like), Transcript.cleaned_text.ilike(like), Transcript.transcript_original.ilike(like), Transcript.ai_tags.ilike(like)))
+        notes_query = notes_query.filter(db.or_(Note.title.ilike(like), Note.body.ilike(like)))
+    entries = entries_query.order_by(Transcript.created_at.desc()).all()
+    notes = notes_query.order_by(Note.created_at.desc()).all()
+    return render_template("topic.html", topic=topic, entries=entries, notes=notes, q=q, master_text=topic_master_text(topic))
 
 
 @app.route("/topic/<int:topic_id>/export")

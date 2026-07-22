@@ -1,35 +1,47 @@
 {% extends "base.html" %}
-
 {% block content %}
-<section class="panel">
-
-  <div class="editor-head">
-    <div>
-      <h1>{{ topic.name }}</h1>
-      <p class="muted">{{ notes|length }} note(s)</p>
-    </div>
-
-    <div style="display:flex; gap:10px; align-items:center;">
-
-      <a class="button primary"
-         href="{{ url_for('export_topic', topic_id=topic.id) }}">
-         Export Master .txt
-      </a>
-
-      <form method="POST"
-            action="{{ url_for('delete_topic', topic_id=topic.id) }}"
-            onsubmit="return confirm('Delete this topic? Notes will remain saved, but this topic label will be removed.');">
-
-        <button type="submit"
-          Delete Topic
-        </button>
-
-      </form>
-
-    </div>
+<section class="hero topic-hero">
+  <div><h1>{{ topic.name }}</h1><p>{{ entries|length }} linked entries · {{ notes|length }} notes</p></div>
+  <div class="hero-actions">
+    <a class="button" href="{{ url_for('topics_index') }}">All Topics</a>
+    <a class="button primary" href="{{ url_for('export_topic', topic_id=topic.id) }}">Export Combined .txt</a>
   </div>
-
-  <textarea readonly rows="28">{{ master_text }}</textarea>
-
 </section>
+<form class="filters" method="get">
+  <input name="q" value="{{ q }}" placeholder="Search within this topic...">
+  <button type="submit">Search</button>
+  {% if q %}<a class="button" href="{{ url_for('view_topic', topic_id=topic.id) }}">Clear</a>{% endif %}
+</form>
+<section class="panel">
+  <div class="section-head"><div><h2>Linked Entries</h2><p class="muted">Analyzed content attached directly to this topic.</p></div></div>
+  {% if entries %}
+    <div class="topic-entry-list">
+      {% for entry in entries %}
+        <article class="topic-entry-card">
+          <div class="editor-head">
+            <div><h3><a href="{{ url_for('edit_transcript', transcript_id=entry.id) }}">{{ entry.filename }}</a></h3><p class="muted">{{ entry.created_at.strftime('%Y-%m-%d %H:%M') }} · {{ entry.input_type }}</p></div>
+            <span class="pill {{ entry.ai_review_status }}">{{ entry.ai_review_status }}</span>
+          </div>
+          {% if entry.ai_summary %}<p class="topic-summary">{{ entry.ai_summary }}</p>{% endif %}
+          {% if entry.cleaned_text %}<div class="combined-content">{{ entry.cleaned_text }}</div>{% endif %}
+          <div class="button-row">
+            <a class="button" href="{{ url_for('edit_transcript', transcript_id=entry.id) }}">Open analysis</a>
+            <a class="button" href="{{ url_for('original_transcript', transcript_id=entry.id) }}">Original transcript</a>
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}<p class="muted">No linked entries match this view.</p>{% endif %}
+</section>
+<section class="panel" style="margin-top:18px;">
+  <div class="section-head"><div><h2>Saved Notes</h2><p class="muted">Selected excerpts and manually organized material.</p></div></div>
+  {% if notes %}
+    <div class="topic-entry-list">
+      {% for note in notes %}<article class="topic-entry-card"><h3>{{ note.title }}</h3><p class="muted">{{ note.created_at.strftime('%Y-%m-%d %H:%M') }}</p><div class="combined-content">{{ note.body }}</div>{% if note.source_transcript_id %}<a class="button" href="{{ url_for('original_transcript', transcript_id=note.source_transcript_id) }}">Original transcript</a>{% endif %}</article>{% endfor %}
+    </div>
+  {% else %}<p class="muted">No notes match this view.</p>{% endif %}
+</section>
+<form method="POST" action="{{ url_for('delete_topic', topic_id=topic.id) }}" onsubmit="return confirm('Delete this topic? Entries and notes remain saved, but the topic links are removed.');" style="margin-top:18px;">
+  <button type="submit" class="danger-button">Delete Topic</button>
+</form>
 {% endblock %}

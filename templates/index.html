@@ -88,7 +88,7 @@
     <div class="section-head">
       <div>
         <h2>Topics</h2>
-        <p class="muted">Topic master files built from notes.</p>
+        <p class="muted">Entries and notes grouped into reusable knowledge areas.</p>
       </div>
     </div>
 
@@ -97,13 +97,15 @@
         {% for topic in topics %}
           <a class="list-item" href="{{ url_for('view_topic', topic_id=topic.id) }}">
             <strong>{{ topic.name }}</strong>
-            <span>{{ topic.notes|length }} note(s)</span>
+            <span>{{ topic.entries|length }} entries · {{ topic.notes|length }} notes</span>
           </a>
         {% endfor %}
       </div>
     {% else %}
-      <p class="muted">No topics yet. Create the first topic from a selected transcript chunk.</p>
+      <p class="muted">No topics yet. Analyze an entry and approve its suggested topics.</p>
     {% endif %}
   </section>
 </div>
+
+<div class="button-row" style="margin-top:16px;"><a class="button" href="{{ url_for('topics_index') }}">Browse and search all topics</a></div>
 {% endblock %}

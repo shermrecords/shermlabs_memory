@@ -1,13 +1,18 @@
 # ShermLabs Memory
 
+<<<<<<< HEAD
 **ShermLabs Memory** is a private, AI-assisted knowledge capture system for recording, transcribing, organizing, reviewing, and retrieving personal information.
 
 The application accepts voice recordings, uploaded audio, pasted text, and documents. Each entry is preserved in its original form, then can be cleaned, summarized, categorized, tagged, connected to projects, and converted into reusable notes.
 
 > **ShermLabs Memory does not replace your memory—it extends it.**
 
----
+ShermLabs Memory is a private Flask application for capturing audio, microphone recordings, pasted text, and documents; preserving the original source; and organizing AI-analyzed content into searchable topics.
+>>>>>>> db0ea5c (working on topics stuff)
 
+## New topic knowledge system
+
+<<<<<<< HEAD
 ## Current Features
 
 ### Universal capture
@@ -176,11 +181,105 @@ venv\Scripts\activate
 
 ### 3. Install dependencies
 
+This build adds direct many-to-many links between entries and topics.
+
+After an entry is analyzed, Together AI now returns:
+
+- `suggested_existing_topics`
+- `suggested_new_topics`
+- summary, cleaned text, tags, action items, entities, category, project, and confidence
+
+The analysis review screen lets the user:
+
+- accept or remove suggested existing topics
+- attach any other existing topics
+- create one or more new topics
+- attach the same entry to several topics
+- save edits or approve the analysis and topic links
+
+Topic links are stored in the SQL database through the `entry_topics` association table. `ai_analysis_json` retains the structured AI response and approved topic names, but it is not yet a vector database or full RAG index.
+
+## Topic access
+
+Open `/topics` to:
+
+- browse every topic
+- search topic names
+- see entry and note counts
+- open a combined topic view
+
+Each topic page includes:
+
+- directly linked analyzed entries
+- AI summaries and cleaned content
+- saved notes
+- search within that topic's entry and note content
+- links back to each entry's analysis
+- links to the read-only original transcript
+- combined text export
+
+## Source provenance
+
+Every analyzed entry includes an **Open Original Transcript** link. The dedicated read-only route is:
+
+```text
+/transcript/<entry_id>/original
+```
+
+This preserves the distinction between:
+
+```text
+Original source → editable working copy → AI analysis
+```
+
+## Microphone recording
+
+The Audio capture page can record directly through the browser microphone using the `MediaRecorder` API. Microphone access requires HTTPS in production or localhost during development.
+
+## Setup
+
+```bash
+python -m venv venv
+source venv/bin/activate       # macOS/Linux
+# venv\Scripts\activate        # Windows
+pip install -r requirements.txt
+cp .env.example .env
+python app.py
+```
+
+Open `http://127.0.0.1:5000`.
+
+## Main environment variables
+
+```env
+SECRET_KEY=
+DATABASE_URL=
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_BUCKET=audio
+TOGETHER_API_KEY=
+TOGETHER_BASE_URL=https://api.together.xyz/v1
+TOGETHER_ANALYSIS_MODEL=openai/gpt-oss-20b
+MAX_CONTENT_MB=100
+```
+
+## Database update
+
+On startup, `db.create_all()` creates the new `entry_topics` table automatically. Existing transcripts, topics, and notes remain intact.
+
+Before deploying a schema update, back up the production database. This MVP still uses lightweight compatibility migrations; Flask-Migrate/Alembic is recommended before larger production changes.
+
+## Render
+
+Build command:
+>>>>>>> db0ea5c (working on topics stuff)
+
 ```bash
 pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+<<<<<<< HEAD
 Local Whisper also requires FFmpeg.
 
 #### macOS
@@ -301,10 +400,14 @@ This controls Flask's maximum request size.
 
 Start the Flask application:
 
+Start command:
+>>>>>>> db0ea5c (working on topics stuff)
+
 ```bash
-python app.py
+gunicorn app:app --bind 0.0.0.0:$PORT
 ```
 
+<<<<<<< HEAD
 Then open:
 
 ```text
@@ -659,3 +762,20 @@ Questions, feedback, or early-access inquiries:
 ## License
 
 No open-source license has been selected yet. Unless a license file is added, all rights are reserved by the project owner.
+
+Health check:
+
+```text
+/health
+```
+
+## Important note about RAG
+
+The current build stores structured analysis and topic relationships, making analyzed material accessible later. A full RAG layer would be a later addition:
+
+```text
+Entry text → chunks → embeddings → vector store → retrieval → cited answer
+```
+
+The topic system should remain the durable organizational layer even after embeddings are added.
+>>>>>>> db0ea5c (working on topics stuff)

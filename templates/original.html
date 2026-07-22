@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel original-source-page">
+  <div class="editor-head">
+    <div><h1>Original Transcript</h1><p class="muted">Read-only source for {{ transcript.filename }}.</p></div>
+    <a class="button" href="{{ url_for('edit_transcript', transcript_id=transcript.id) }}">Back to analysis</a>
+  </div>
+  <div class="source-provenance">
+    <span>Type: {{ transcript.input_type }}</span>
+    <span>Original file: {{ transcript.original_filename or '—' }}</span>
+    <span>Created: {{ transcript.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+  </div>
+  <pre class="original-transcript-full">{{ transcript.transcript_original or '(Original transcript is empty.)' }}</pre>
+</section>
+{% endblock %}
