@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="dashboard-hero"><div><p class="eyebrow">Follow-up</p><h1>Tasks</h1><p>Turn decisions and AI-identified action items into work you can track.</p></div></section>
+
+<section class="dashboard-section">
+  <div class="section-head"><div><p class="eyebrow">New</p><h2>Add a task</h2></div></div>
+  <form class="global-search" method="post" action="{{ url_for('create_task') }}">
+    <input name="title" placeholder="What needs to be done?" required>
+    <select name="priority"><option value="normal">Normal priority</option><option value="high">High priority</option><option value="low">Low priority</option></select>
+    <input type="date" name="due_date">
+    <select name="project_id"><option value="">No project</option>{% for project in projects %}<option value="{{ project.id }}">{{ project.name }}</option>{% endfor %}</select>
+    <button type="submit">Add task</button>
+  </form>
+</section>
+
+<form class="global-search" method="get">
+  <select name="status"><option value="open" {% if selected_status == 'open' %}selected{% endif %}>Open</option><option value="completed" {% if selected_status == 'completed' %}selected{% endif %}>Completed</option><option value="all" {% if selected_status == 'all' %}selected{% endif %}>All</option></select>
+  <select name="priority"><option value="">All priorities</option>{% for value in ['high', 'normal', 'low'] %}<option value="{{ value }}" {% if selected_priority == value %}selected{% endif %}>{{ value|title }}</option>{% endfor %}</select>
+  <select name="project_id"><option value="">All projects</option>{% for project in projects %}<option value="{{ project.id }}" {% if selected_project_id == project.id %}selected{% endif %}>{{ project.name }}</option>{% endfor %}</select>
+  <button type="submit">Filter</button>
+</form>
+
+<section class="dashboard-section">
+  <div class="section-head"><div><p class="eyebrow">Work queue</p><h2>{{ tasks|length }} task{{ '' if tasks|length == 1 else 's' }}</h2></div></div>
+  <div class="entry-feed">
+    {% for task in tasks %}
+    <article class="rich-entry-card task-card {% if task.status == 'completed' %}task-completed{% endif %}">
+      <form method="post" action="{{ url_for('toggle_task', task_id=task.id) }}"><button class="action-check" type="submit">{% if task.status == 'completed' %}✓{% endif %}</button></form>
+      <div class="card-copy">
+        <div class="card-title-row"><h3>{{ task.title }}</h3><span class="pill {{ task.priority }}">{{ task.priority }} priority</span></div>
+        <div class="entry-meta">{% if task.due_date %}<span class="{% if task.status != 'completed' and task.due_date < today %}overdue{% endif %}">Due {{ task.due_date.strftime('%b %d, %Y') }}</span>{% endif %}{% if task.project %}<a href="{{ url_for('view_project', project_id=task.project.id) }}">{{ task.project.name }}</a>{% endif %}{% if task.source_entry %}<a href="{{ url_for('edit_transcript', transcript_id=task.source_entry.id) }}">Source entry</a>{% endif %}</div>
+        <details><summary>Edit</summary>
+          <form method="post" action="{{ url_for('update_task', task_id=task.id) }}">
+            <input name="title" value="{{ task.title }}" required>
+            <select name="priority">{% for value in ['high', 'normal', 'low'] %}<option value="{{ value }}" {% if task.priority == value %}selected{% endif %}>{{ value|title }}</option>{% endfor %}</select>
+            <input type="date" name="due_date" value="{{ task.due_date.isoformat() if task.due_date else '' }}">
+            <select name="project_id"><option value="">No project</option>{% for project in projects %}<option value="{{ project.id }}" {% if task.project_id == project.id %}selected{% endif %}>{{ project.name }}</option>{% endfor %}</select>
+            <button type="submit">Save</button>
+          </form>
+          <form method="post" action="{{ url_for('delete_task', task_id=task.id) }}" onsubmit="return confirm('Delete this task?');"><button type="submit">Delete</button></form>
+        </details>
+      </div>
+    </article>
+    {% else %}<div class="empty-state"><strong>No tasks here.</strong><p>Add one above or approve AI action items from an entry.</p></div>{% endfor %}
+  </div>
+</section>
+<style>
+.task-card{align-items:flex-start}.task-card>form{padding-top:.3rem}.task-completed{opacity:.65}.task-completed h3{text-decoration:line-through}.task-rail-row{display:grid;grid-template-columns:auto 1fr;gap:.65rem;align-items:start}.task-rail-row>a{text-decoration:none;color:inherit}.action-check{cursor:pointer}.overdue{font-weight:700}details{margin-top:.8rem}details form{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.65rem}
+</style>
+{% endblock %}

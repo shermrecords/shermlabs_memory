@@ -104,11 +104,14 @@
     </section>
 
     <section class="rail-card">
-      <div class="section-head"><div><p class="eyebrow">Follow-up</p><h2>Action items</h2></div></div>
+      <div class="section-head"><div><p class="eyebrow">Follow-up</p><h2>Needs attention</h2></div><a class="text-link" href="{{ url_for('tasks_index') }}">View all</a></div>
       <div class="action-list">
-        {% for action in action_items %}
-        <a href="{{ url_for('edit_transcript', transcript_id=action.entry.id) }}"><span class="action-check"></span><span><strong>{{ action.text }}</strong><small>From {{ action.entry.source_title or action.entry.filename|replace('_', ' ') }}</small></span></a>
-        {% else %}<p class="muted">Action items identified by AI will appear here.</p>{% endfor %}
+        {% for task in attention_tasks %}
+        <div class="task-rail-row">
+          <form method="post" action="{{ url_for('toggle_task', task_id=task.id) }}"><button class="action-check" type="submit" aria-label="Complete task"></button></form>
+          <a href="{{ url_for('tasks_index') }}"><span><strong>{{ task.title }}</strong><small>{{ task.priority|title }} priority{% if task.due_date %} · Due {{ task.due_date.strftime('%b %d') }}{% endif %}{% if task.project %} · {{ task.project.name }}{% endif %}</small></span></a>
+        </div>
+        {% else %}<p class="muted">No open tasks. Approved AI action items will appear here.</p>{% endfor %}
       </div>
     </section>
   </aside>

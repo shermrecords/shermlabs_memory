@@ -172,6 +172,32 @@ class Project(db.Model):
     entries = db.relationship("Transcript", backref="project", lazy=True)
 
 
+class Task(db.Model):
+    __table_args__ = (
+        db.UniqueConstraint(
+            "source_transcript_id",
+            "source_action_index",
+            name="uq_task_source_action",
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    title = db.Column(db.String(500), nullable=False)
+    priority = db.Column(db.String(20), nullable=False, default="normal", index=True)
+    due_date = db.Column(db.Date, nullable=True, index=True)
+    status = db.Column(db.String(30), nullable=False, default="open", index=True)
+    project_id = db.Column(db.Integer, db.ForeignKey("project.id"), nullable=True, index=True)
+    source_transcript_id = db.Column(db.Integer, db.ForeignKey("transcript.id"), nullable=True, index=True)
+    source_action_index = db.Column(db.Integer, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    completed_at = db.Column(db.DateTime, nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    project = db.relationship("Project", backref=db.backref("tasks", lazy=True))
+    source_entry = db.relationship("Transcript", backref=db.backref("tasks", lazy=True))
+
+
 class Topic(db.Model):
     __table_args__ = (db.UniqueConstraint("user_id", "name", name="uq_topic_user_name"),)
     id = db.Column(db.Integer, primary_key=True)
@@ -514,6 +540,54 @@ def owned_project_or_404(project_id: int):
     return Project.query.filter_by(id=project_id, user_id=current_user.id).first_or_404()
 
 
+def owned_task_or_404(task_id: int):
+    return Task.query.filter_by(id=task_id, user_id=current_user.id).first_or_404()
+
+
+def create_tasks_from_approved_action_items(transcript: Transcript) -> int:
+    """Convert approved AI action items into real tasks without duplicates."""
+    if transcript.ai_review_status != "approved":
+        return 0
+
+    actions = _parse_json_text(transcript.ai_action_items)
+    completed_indexes = set(_parse_json_text(transcript.completed_action_items))
+    existing_indexes = {
+        row.source_action_index
+        for row in Task.query.filter_by(
+            user_id=transcript.user_id,
+            source_transcript_id=transcript.id,
+        ).all()
+        if row.source_action_index is not None
+    }
+
+    created = 0
+    for index, action in enumerate(actions):
+        if not isinstance(action, str) or not action.strip() or index in existing_indexes:
+            continue
+        is_completed = index in completed_indexes
+        db.session.add(Task(
+            user_id=transcript.user_id,
+            title=action.strip(),
+            priority="normal",
+            status="completed" if is_completed else "open",
+            completed_at=datetime.utcnow() if is_completed else None,
+            project_id=transcript.project_id,
+            source_transcript_id=transcript.id,
+            source_action_index=index,
+        ))
+        created += 1
+    return created
+
+
+def sync_legacy_tasks_for_user(user_id: int) -> None:
+    """Backfill tasks approved before the Task model existed."""
+    created = 0
+    for entry in Transcript.query.filter_by(user_id=user_id, ai_review_status="approved").all():
+        created += create_tasks_from_approved_action_items(entry)
+    if created:
+        db.session.commit()
+
+
 def sync_legacy_projects_for_user(user_id: int) -> None:
     """Turn existing ai_project labels into real Project records without losing text."""
     entries = Transcript.query.filter(
@@ -658,12 +732,24 @@ def index():
     ][:4]
     recent_entries = all_transcripts[:8]
 
-    action_items = []
-    for item in all_transcripts:
-        completed = set(_parse_json_text(item.completed_action_items))
-        for index, action in enumerate(_parse_json_text(item.ai_action_items)):
-            if isinstance(action, str) and action.strip():
-                action_items.append({"text": action.strip(), "entry": item, "index": index, "completed": index in completed})
+    sync_legacy_tasks_for_user(current_user.id)
+    priority_order = db.case(
+        (Task.priority == "high", 1),
+        (Task.priority == "normal", 2),
+        (Task.priority == "low", 3),
+        else_=4,
+    )
+    attention_tasks = (
+        Task.query.filter(Task.user_id == current_user.id, Task.status != "completed")
+        .order_by(
+            db.case((Task.due_date.is_(None), 1), else_=0),
+            Task.due_date.asc(),
+            priority_order,
+            Task.created_at.desc(),
+        )
+        .limit(6)
+        .all()
+    )
 
     projects = Project.query.filter_by(user_id=current_user.id).order_by(Project.updated_at.desc()).limit(6).all()
 
@@ -686,7 +772,7 @@ def index():
         topics=topics,
         recent_topics=recent_topics,
         projects=projects,
-        action_items=action_items[:6],
+        attention_tasks=attention_tasks,
         dashboard_stats=dashboard_stats,
         added_today=added_today,
         first_name=first_name,
@@ -709,6 +795,141 @@ def delete_topic(topic_id):
 
     flash(f"Deleted topic: {topic.name}", "success")
     return redirect(url_for("topics_index"))
+
+
+@app.route("/tasks")
+@login_required
+def tasks_index():
+    sync_legacy_tasks_for_user(current_user.id)
+    status = request.args.get("status", "open").strip()
+    priority = request.args.get("priority", "").strip()
+    project_id = request.args.get("project_id", type=int)
+
+    query = Task.query.filter(Task.user_id == current_user.id)
+    if status == "open":
+        query = query.filter(Task.status != "completed")
+    elif status == "completed":
+        query = query.filter(Task.status == "completed")
+    elif status != "all":
+        status = "open"
+        query = query.filter(Task.status != "completed")
+
+    if priority in {"high", "normal", "low"}:
+        query = query.filter(Task.priority == priority)
+    else:
+        priority = ""
+    if project_id:
+        query = query.filter(Task.project_id == project_id)
+
+    priority_order = db.case(
+        (Task.priority == "high", 1),
+        (Task.priority == "normal", 2),
+        (Task.priority == "low", 3),
+        else_=4,
+    )
+    tasks = query.order_by(
+        db.case((Task.status == "completed", 1), else_=0),
+        db.case((Task.due_date.is_(None), 1), else_=0),
+        Task.due_date.asc(),
+        priority_order,
+        Task.created_at.desc(),
+    ).all()
+    projects = Project.query.filter_by(user_id=current_user.id).order_by(Project.name.asc()).all()
+    return render_template(
+        "tasks.html",
+        tasks=tasks,
+        projects=projects,
+        selected_status=status,
+        selected_priority=priority,
+        selected_project_id=project_id,
+        today=datetime.utcnow().date(),
+    )
+
+
+@app.route("/tasks/create", methods=["POST"])
+@login_required
+def create_task():
+    title = request.form.get("title", "").strip()
+    if not title:
+        flash("Task title cannot be empty.", "error")
+        return redirect(url_for("tasks_index"))
+
+    priority = request.form.get("priority", "normal")
+    if priority not in {"high", "normal", "low"}:
+        priority = "normal"
+
+    due_date = None
+    due_date_text = request.form.get("due_date", "").strip()
+    if due_date_text:
+        try:
+            due_date = datetime.strptime(due_date_text, "%Y-%m-%d").date()
+        except ValueError:
+            flash("Due date must use YYYY-MM-DD.", "error")
+            return redirect(url_for("tasks_index"))
+
+    project = None
+    project_id = request.form.get("project_id", type=int)
+    if project_id:
+        project = Project.query.filter_by(id=project_id, user_id=current_user.id).first()
+
+    db.session.add(Task(user_id=current_user.id, title=title, priority=priority, due_date=due_date, project=project))
+    db.session.commit()
+    flash("Task created.", "success")
+    return redirect(url_for("tasks_index"))
+
+
+@app.route("/tasks/<int:task_id>/toggle", methods=["POST"])
+@login_required
+def toggle_task(task_id):
+    task = owned_task_or_404(task_id)
+    if task.status == "completed":
+        task.status = "open"
+        task.completed_at = None
+    else:
+        task.status = "completed"
+        task.completed_at = datetime.utcnow()
+    task.updated_at = datetime.utcnow()
+    db.session.commit()
+    return redirect(request.referrer or url_for("tasks_index"))
+
+
+@app.route("/tasks/<int:task_id>/update", methods=["POST"])
+@login_required
+def update_task(task_id):
+    task = owned_task_or_404(task_id)
+    title = request.form.get("title", "").strip()
+    if title:
+        task.title = title
+    priority = request.form.get("priority", task.priority)
+    if priority in {"high", "normal", "low"}:
+        task.priority = priority
+
+    due_date_text = request.form.get("due_date", "").strip()
+    if due_date_text:
+        try:
+            task.due_date = datetime.strptime(due_date_text, "%Y-%m-%d").date()
+        except ValueError:
+            flash("Due date must use YYYY-MM-DD.", "error")
+            return redirect(url_for("tasks_index"))
+    else:
+        task.due_date = None
+
+    project_id = request.form.get("project_id", type=int)
+    task.project = Project.query.filter_by(id=project_id, user_id=current_user.id).first() if project_id else None
+    task.updated_at = datetime.utcnow()
+    db.session.commit()
+    flash("Task updated.", "success")
+    return redirect(url_for("tasks_index"))
+
+
+@app.route("/tasks/<int:task_id>/delete", methods=["POST"])
+@login_required
+def delete_task(task_id):
+    task = owned_task_or_404(task_id)
+    db.session.delete(task)
+    db.session.commit()
+    flash("Task deleted.", "success")
+    return redirect(url_for("tasks_index"))
 
 
 @app.route("/upload", methods=["GET", "POST"])
@@ -916,7 +1137,13 @@ def review_ai_analysis(transcript_id):
     analysis_data.update({"cleaned_text": transcript.cleaned_text, "summary": transcript.ai_summary, "category": transcript.ai_category, "project": transcript.ai_project, "tags": tags, "action_items": actions, "approved_topics": [topic.name for topic in transcript.topics]})
     transcript.ai_analysis_json = json.dumps(analysis_data, ensure_ascii=False, indent=2)
     if action == "approve":
-        transcript.ai_review_status = "approved"; transcript.processing_status = "approved"; flash("AI analysis and topic links approved.", "success")
+        transcript.ai_review_status = "approved"
+        transcript.processing_status = "approved"
+        created_tasks = create_tasks_from_approved_action_items(transcript)
+        message = "AI analysis and topic links approved."
+        if created_tasks:
+            message += f" Created {created_tasks} task{'s' if created_tasks != 1 else ''}."
+        flash(message, "success")
     elif action == "reject":
         transcript.ai_review_status = "rejected"; flash("AI analysis marked rejected. The original entry was not changed.", "success")
     else:

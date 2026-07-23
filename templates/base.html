@@ -23,6 +23,7 @@
         <a class="{% if request.endpoint == 'index' %}active{% endif %}" href="{{ url_for('index') }}"><span>⌂</span> Dashboard</a>
         <a class="{% if request.endpoint == 'topics_index' or request.endpoint == 'view_topic' %}active{% endif %}" href="{{ url_for('topics_index') }}"><span>◫</span> Topics</a>
         <a class="{% if request.endpoint == 'projects_index' or request.endpoint == 'view_project' %}active{% endif %}" href="{{ url_for('projects_index') }}"><span>▣</span> Projects</a>
+        <a class="{% if request.endpoint in ['tasks_index', 'create_task', 'update_task', 'toggle_task'] %}active{% endif %}" href="{{ url_for('tasks_index') }}"><span>✓</span> Tasks</a>
         <a href="{{ url_for('index') }}#entries"><span>▤</span> Entries</a>
         <a class="{% if request.endpoint == 'archive_index' %}active{% endif %}" href="{{ url_for('archive_index') }}"><span>□</span> Archive</a>
       </nav>
