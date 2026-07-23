@@ -147,11 +147,29 @@ class Transcript(db.Model):
     ai_review_status = db.Column(db.String(40), nullable=False, default="pending")
     processing_error = db.Column(db.Text, nullable=True)
 
+    is_archived = db.Column(db.Boolean, nullable=False, default=False, index=True)
+    archived_at = db.Column(db.DateTime, nullable=True)
+    completed_action_items = db.Column(db.Text, nullable=True)
+    project_id = db.Column(db.Integer, db.ForeignKey("project.id"), nullable=True, index=True)
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     notes = db.relationship("Note", backref="source_transcript", lazy=True)
     topics = db.relationship("Topic", secondary=entry_topics, back_populates="entries")
+
+
+class Project(db.Model):
+    __table_args__ = (db.UniqueConstraint("user_id", "name", name="uq_project_user_name"),)
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    name = db.Column(db.String(255), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    status = db.Column(db.String(30), nullable=False, default="active")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    entries = db.relationship("Transcript", backref="project", lazy=True)
 
 
 class Topic(db.Model):
@@ -252,6 +270,22 @@ def get_or_create_topic(name: str) -> Topic:
     db.session.add(topic)
     db.session.commit()
     return topic
+
+
+def get_or_create_project(name: str):
+    normalized = (name or "").strip()
+    if not normalized:
+        return None
+    existing = Project.query.filter(
+        Project.user_id == current_user.id,
+        db.func.lower(Project.name) == normalized.lower(),
+    ).first()
+    if existing:
+        return existing
+    project = Project(user_id=current_user.id, name=normalized)
+    db.session.add(project)
+    db.session.flush()
+    return project
 
 
 def get_supabase_client():
@@ -433,6 +467,10 @@ def ensure_transcript_columns():
         "processing_status": "ALTER TABLE transcript ADD COLUMN processing_status VARCHAR(40) DEFAULT 'not_analyzed' NOT NULL",
         "ai_review_status": "ALTER TABLE transcript ADD COLUMN ai_review_status VARCHAR(40) DEFAULT 'pending' NOT NULL",
         "processing_error": "ALTER TABLE transcript ADD COLUMN processing_error TEXT",
+        "is_archived": "ALTER TABLE transcript ADD COLUMN is_archived BOOLEAN DEFAULT FALSE NOT NULL",
+        "archived_at": "ALTER TABLE transcript ADD COLUMN archived_at TIMESTAMP",
+        "completed_action_items": "ALTER TABLE transcript ADD COLUMN completed_action_items TEXT",
+        "project_id": "ALTER TABLE transcript ADD COLUMN project_id INTEGER",
     }
     for column, statement in statements.items():
         if column not in existing:
@@ -460,6 +498,7 @@ def claim_legacy_data(user_id: int) -> None:
     Transcript.query.filter(Transcript.user_id.is_(None)).update({Transcript.user_id: user_id})
     Topic.query.filter(Topic.user_id.is_(None)).update({Topic.user_id: user_id})
     Note.query.filter(Note.user_id.is_(None)).update({Note.user_id: user_id})
+    Project.query.filter(Project.user_id.is_(None)).update({Project.user_id: user_id})
     db.session.commit()
 
 
@@ -469,6 +508,36 @@ def owned_transcript_or_404(transcript_id: int):
 
 def owned_topic_or_404(topic_id: int):
     return Topic.query.filter_by(id=topic_id, user_id=current_user.id).first_or_404()
+
+
+def owned_project_or_404(project_id: int):
+    return Project.query.filter_by(id=project_id, user_id=current_user.id).first_or_404()
+
+
+def sync_legacy_projects_for_user(user_id: int) -> None:
+    """Turn existing ai_project labels into real Project records without losing text."""
+    entries = Transcript.query.filter(
+        Transcript.user_id == user_id,
+        Transcript.project_id.is_(None),
+        Transcript.ai_project.isnot(None),
+    ).all()
+    changed = False
+    for entry in entries:
+        name = (entry.ai_project or "").strip()
+        if not name:
+            continue
+        project = Project.query.filter(
+            Project.user_id == user_id,
+            db.func.lower(Project.name) == name.lower(),
+        ).first()
+        if not project:
+            project = Project(user_id=user_id, name=name)
+            db.session.add(project)
+            db.session.flush()
+        entry.project = project
+        changed = True
+    if changed:
+        db.session.commit()
 
 
 # ---------------------------
@@ -544,11 +613,14 @@ def logout():
 @app.route("/")
 @login_required
 def index():
+    sync_legacy_projects_for_user(current_user.id)
     q = request.args.get("q", "").strip()
     status = request.args.get("status", "").strip()
 
-    query = Transcript.query.filter(Transcript.user_id == current_user.id)
+    base_query = Transcript.query.filter(Transcript.user_id == current_user.id, Transcript.is_archived.is_(False))
+    all_transcripts = base_query.order_by(Transcript.updated_at.desc()).all()
 
+    query = base_query
     if q:
         like = f"%{q}%"
         query = query.filter(
@@ -574,18 +646,55 @@ def index():
             (Transcript.review_status == "complete", 3),
             else_=4,
         ),
-        Transcript.created_at.desc(),
+        Transcript.updated_at.desc(),
     ).all()
 
     topics = Topic.query.filter_by(user_id=current_user.id).order_by(Topic.name.asc()).all()
+    recent_topics = Topic.query.filter_by(user_id=current_user.id).order_by(Topic.created_at.desc()).limit(6).all()
+
+    continue_working = [
+        item for item in all_transcripts
+        if item.review_status in {"unread", "in_progress"}
+    ][:4]
+    recent_entries = all_transcripts[:8]
+
+    action_items = []
+    for item in all_transcripts:
+        completed = set(_parse_json_text(item.completed_action_items))
+        for index, action in enumerate(_parse_json_text(item.ai_action_items)):
+            if isinstance(action, str) and action.strip():
+                action_items.append({"text": action.strip(), "entry": item, "index": index, "completed": index in completed})
+
+    projects = Project.query.filter_by(user_id=current_user.id).order_by(Project.updated_at.desc()).limit(6).all()
+
+    today = datetime.utcnow().date()
+    added_today = sum(1 for item in all_transcripts if item.created_at and item.created_at.date() == today)
+    first_name = current_user.email.split("@", 1)[0].split(".", 1)[0].title()
+
+    dashboard_stats = {
+        "entries": len(all_transcripts),
+        "unread": sum(1 for item in all_transcripts if item.review_status == "unread"),
+        "topics": len(topics),
+        "projects": Project.query.filter_by(user_id=current_user.id).count(),
+    }
 
     return render_template(
         "index.html",
         transcripts=transcripts,
+        recent_entries=recent_entries,
+        continue_working=continue_working,
         topics=topics,
+        recent_topics=recent_topics,
+        projects=projects,
+        action_items=action_items[:6],
+        dashboard_stats=dashboard_stats,
+        added_today=added_today,
+        first_name=first_name,
+        now_hour=datetime.now().hour,
         q=q,
         status=status,
     )
+
 @app.route("/topic/<int:topic_id>/delete", methods=["POST"])
 @login_required
 def delete_topic(topic_id):
@@ -735,6 +844,7 @@ def edit_transcript(transcript_id):
         ai_entities=_parse_json_text(transcript.ai_entities),
         analysis_data=_parse_json_text(transcript.ai_analysis_json, {}),
         attached_topic_ids={topic.id for topic in transcript.topics},
+        completed_action_indexes=set(_parse_json_text(transcript.completed_action_items)),
     )
 
 
@@ -758,6 +868,7 @@ def analyze_transcript(transcript_id):
         transcript.ai_summary = analysis.get("summary", "").strip()
         transcript.ai_category = analysis.get("category", "").strip()
         transcript.ai_project = analysis.get("project", "").strip()
+        transcript.project = get_or_create_project(transcript.ai_project) if transcript.ai_project else None
         transcript.ai_tags = _json_text(analysis.get("tags"))
         transcript.ai_action_items = _json_text(analysis.get("action_items"))
         transcript.ai_entities = _json_text(analysis.get("entities"))
@@ -787,6 +898,7 @@ def review_ai_analysis(transcript_id):
     transcript.ai_summary = request.form.get("ai_summary", transcript.ai_summary or "").strip()
     transcript.ai_category = request.form.get("ai_category", transcript.ai_category or "").strip()
     transcript.ai_project = request.form.get("ai_project", transcript.ai_project or "").strip()
+    transcript.project = get_or_create_project(transcript.ai_project) if transcript.ai_project else None
     tags = [x.strip() for x in request.form.get("ai_tags", "").split(",") if x.strip()]
     actions = [x.strip() for x in request.form.get("ai_action_items", "").splitlines() if x.strip()]
     transcript.ai_tags = _json_text(tags)
@@ -898,7 +1010,7 @@ def original_transcript(transcript_id):
 def view_topic(topic_id):
     topic = owned_topic_or_404(topic_id)
     q = request.args.get("q", "").strip()
-    entries_query = Transcript.query.join(entry_topics).filter(entry_topics.c.topic_id == topic.id, Transcript.user_id == current_user.id)
+    entries_query = Transcript.query.join(entry_topics).filter(entry_topics.c.topic_id == topic.id, Transcript.user_id == current_user.id, Transcript.is_archived.is_(False))
     notes_query = Note.query.join(note_topics).filter(note_topics.c.topic_id == topic.id, Note.user_id == current_user.id)
     if q:
         like = f"%{q}%"
@@ -919,14 +1031,135 @@ def export_topic(topic_id):
     return send_file(output_path, as_attachment=True, download_name=output_path.name)
 
 
+@app.route("/transcript/<int:transcript_id>/archive", methods=["POST"])
+@login_required
+def archive_transcript(transcript_id):
+    transcript = owned_transcript_or_404(transcript_id)
+    transcript.is_archived = True
+    transcript.archived_at = datetime.utcnow()
+    db.session.commit()
+    flash("Entry archived.", "success")
+    return redirect(url_for("index"))
+
+
+@app.route("/archive")
+@login_required
+def archive_index():
+    entries = Transcript.query.filter_by(user_id=current_user.id, is_archived=True).order_by(Transcript.archived_at.desc()).all()
+    return render_template("archive.html", entries=entries)
+
+
+@app.route("/transcript/<int:transcript_id>/restore", methods=["POST"])
+@login_required
+def restore_transcript(transcript_id):
+    transcript = owned_transcript_or_404(transcript_id)
+    transcript.is_archived = False
+    transcript.archived_at = None
+    db.session.commit()
+    flash("Entry restored.", "success")
+    return redirect(url_for("archive_index"))
+
+
+@app.route("/transcript/<int:transcript_id>/action/<int:action_index>/toggle", methods=["POST"])
+@login_required
+def toggle_action_item(transcript_id, action_index):
+    transcript = owned_transcript_or_404(transcript_id)
+    actions = _parse_json_text(transcript.ai_action_items)
+    if action_index < 0 or action_index >= len(actions):
+        flash("Action item not found.", "error")
+        return redirect(url_for("edit_transcript", transcript_id=transcript.id))
+    completed = set(_parse_json_text(transcript.completed_action_items))
+    if action_index in completed:
+        completed.remove(action_index)
+    else:
+        completed.add(action_index)
+    transcript.completed_action_items = _json_text(sorted(completed))
+    db.session.commit()
+    return redirect(request.referrer or url_for("edit_transcript", transcript_id=transcript.id))
+
+
+@app.route("/projects", methods=["GET", "POST"])
+@login_required
+def projects_index():
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        if not name:
+            flash("Project name is required.", "error")
+        else:
+            project = get_or_create_project(name)
+            project.description = request.form.get("description", "").strip() or project.description
+            db.session.commit()
+            flash("Project saved.", "success")
+            return redirect(url_for("view_project", project_id=project.id))
+    projects = Project.query.filter_by(user_id=current_user.id).order_by(Project.updated_at.desc()).all()
+    return render_template("projects.html", projects=projects)
+
+
+@app.route("/project/<int:project_id>", methods=["GET", "POST"])
+@login_required
+def view_project(project_id):
+    project = owned_project_or_404(project_id)
+    if request.method == "POST":
+        project.name = request.form.get("name", project.name).strip() or project.name
+        project.description = request.form.get("description", "").strip()
+        project.status = request.form.get("status", "active")
+        for entry in project.entries:
+            entry.ai_project = project.name
+        db.session.commit()
+        flash("Project updated.", "success")
+        return redirect(url_for("view_project", project_id=project.id))
+    entries = Transcript.query.filter_by(user_id=current_user.id, project_id=project.id, is_archived=False).order_by(Transcript.updated_at.desc()).all()
+    action_items = []
+    topic_counts = {}
+    for entry in entries:
+        completed = set(_parse_json_text(entry.completed_action_items))
+        for index, text_value in enumerate(_parse_json_text(entry.ai_action_items)):
+            action_items.append({"entry": entry, "index": index, "text": text_value, "completed": index in completed})
+        for topic in entry.topics:
+            topic_counts[topic] = topic_counts.get(topic, 0) + 1
+    related_topics = sorted(topic_counts, key=lambda t: (-topic_counts[t], t.name.lower()))
+    return render_template("project.html", project=project, entries=entries, action_items=action_items, related_topics=related_topics)
+
+
+@app.route("/project/<int:project_id>/delete", methods=["POST"])
+@login_required
+def delete_project(project_id):
+    project = owned_project_or_404(project_id)
+    for entry in project.entries:
+        entry.project = None
+    db.session.delete(project)
+    db.session.commit()
+    flash("Project deleted; its entries were kept.", "success")
+    return redirect(url_for("projects_index"))
+
+
 @app.route("/transcript/<int:transcript_id>/delete", methods=["POST"])
 @login_required
 def delete_transcript(transcript_id):
     transcript = owned_transcript_or_404(transcript_id)
+    if not transcript.is_archived:
+        flash("Archive the entry before deleting it permanently.", "error")
+        return redirect(url_for("edit_transcript", transcript_id=transcript.id))
+    transcript.topics.clear()
+    for note in list(transcript.notes):
+        db.session.delete(note)
+    if transcript.storage_key:
+        supabase = get_supabase_client()
+        if supabase:
+            try:
+                supabase.storage.from_(SUPABASE_BUCKET).remove([transcript.storage_key])
+            except Exception as exc:
+                print(f"Storage delete failed: {exc}")
+    if transcript.filepath:
+        try:
+            Path(transcript.filepath).unlink(missing_ok=True)
+        except OSError:
+            pass
     db.session.delete(transcript)
     db.session.commit()
-    flash("Transcript deleted.", "success")
-    return redirect(url_for("index"))
+    flash("Entry permanently deleted.", "success")
+    return redirect(url_for("archive_index"))
+
 
 @app.route("/health")
 def health():

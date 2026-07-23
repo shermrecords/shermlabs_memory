@@ -1,276 +1,172 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="editor-layout">
-  <div class="panel transcript-panel">
-    <div class="editor-head">
-      <div>
-        <h1>Edit Working Copy</h1>
-        <p class="muted">Original stays untouched. This working copy is your review queue.</p>
-      </div>
-      <span class="pill {{ transcript.review_status }}">{{ transcript.review_status }}</span>
+<section class="entry-hero">
+  <div>
+    <div class="eyebrow-row">
+      <span class="entry-type-badge">{{ transcript.input_type|default('entry')|title }}</span>
+      <span class="pill {{ transcript.review_status }}">{{ transcript.review_status|replace('_', ' ')|title }}</span>
+      {% if transcript.is_archived %}<span class="pill archived">Archived</span>{% endif %}
     </div>
-
-    <form method="post" class="form-stack">
-      <label>
-        Title
-        <input name="filename" value="{{ transcript.filename }}">
-      </label>
-
-      <div class="meta">
-        <span>Original file: {{ transcript.original_filename or "—" }}</span>
-        <span>Date: {{ transcript.recording_date or "—" }}</span>
-        <span>{{ transcript.weekday or "—" }} {{ transcript.recording_time or "" }}</span>
-      </div>
-
-      <label>
-        Review status
-        <select name="review_status">
-          <option value="unread" {% if transcript.review_status == "unread" %}selected{% endif %}>unread</option>
-          <option value="in_progress" {% if transcript.review_status == "in_progress" %}selected{% endif %}>in_progress</option>
-          <option value="complete" {% if transcript.review_status == "complete" %}selected{% endif %}>complete</option>
-        </select>
-      </label>
-
-      <div class="tool-section">
-        <div class="tool-title">Voice</div>
-
-        <div class="tool-grid">
-          <label>
-            Voice
-            <select id="speechVoice"></select>
-          </label>
-
-          <label>
-            Speed
-            <select id="speechRate">
-              <option value="0.5">Very Slow</option>
-              <option value="0.7">Slow</option>
-              <option value="0.8" selected>Comfortable</option>
-              <option value="1.0">Normal</option>
-              <option value="1.2">Fast</option>
-            </select>
-          </label>
-        </div>
-
-        <div class="tts-controls">
-          <button type="button" onclick="speakWorkingCopy()">Read All</button>
-          <button type="button" onclick="speakFromCursor()">Read From Cursor</button>
-          <button type="button" onclick="speakSelection()">Read Selection</button>
-          <button type="button" onclick="pauseSpeech()">Pause</button>
-          <button type="button" onclick="resumeSpeech()">Resume</button>
-          <button type="button" onclick="stopSpeech()">Stop</button>
-        </div>
-      </div>
-
-      <div class="tool-section">
-        <div class="tool-title">Cleanup</div>
-
-        <div class="button-row">
-          <button type="button" onclick="cleanForListening()">Clean For Listening</button>
-          <button type="button" onclick="removeParentheses()">Remove (...)</button>
-          <button type="button" onclick="removeSquareBrackets()">Remove [...]</button>
-        </div>
-      </div>
-
-      <div class="tool-section">
-        <div class="tool-title">Writing</div>
-
-        <div class="button-row">
-          <button type="button" onclick="lookupSynonyms()">Synonyms</button>
-        </div>
-
-        <div id="synonymBox" class="synonym-box" style="display:none;"></div>
-      </div>
-
-      <label>
-        Working copy
-        <textarea id="workingCopy" name="transcript_working" rows="24">{{ transcript.transcript_working }}</textarea>
-      </label>
-
-      <button type="submit" class="primary">Save Working Copy</button>
-    </form>
-
-    <div class="source-link-bar">
-      <span>Need to verify the AI output against the source?</span>
-      <a class="button" href="{{ url_for('original_transcript', transcript_id=transcript.id) }}">Open Original Transcript</a>
-    </div>
-
-    <details class="original-box" id="original-transcript">
-      <summary>Quick preview of original transcript</summary>
-      <pre>{{ transcript.transcript_original }}</pre>
-    </details>
-
-    <section class="ai-panel">
-      <div class="editor-head">
-        <div>
-          <h2>AI Analysis</h2>
-          <p class="muted">Separate from your source text. Review everything before approving it.</p>
-        </div>
-        <span class="pill {{ transcript.processing_status }}">{{ transcript.processing_status or "not_analyzed" }}</span>
-      </div>
-
-      {% if transcript.processing_error %}
-        <div class="flash error">{{ transcript.processing_error }}</div>
-      {% endif %}
-
-      <form method="post" action="{{ url_for('analyze_transcript', transcript_id=transcript.id) }}">
-        <button type="submit" class="primary">{% if transcript.ai_summary %}Analyze Again{% else %}Analyze with AI{% endif %}</button>
-      </form>
-
-      {% if transcript.ai_summary or transcript.cleaned_text %}
-        <form method="post" action="{{ url_for('review_ai_analysis', transcript_id=transcript.id) }}" class="form-stack ai-review-form">
-          <label>
-            Cleaned text
-            <textarea name="cleaned_text" rows="16">{{ transcript.cleaned_text or "" }}</textarea>
-          </label>
-
-          <label>
-            Summary
-            <textarea name="ai_summary" rows="4">{{ transcript.ai_summary or "" }}</textarea>
-          </label>
-
-          <div class="tool-grid">
-            <label>
-              Category
-              <input name="ai_category" value="{{ transcript.ai_category or '' }}">
-            </label>
-            <label>
-              Suggested project
-              <input name="ai_project" value="{{ transcript.ai_project or '' }}">
-            </label>
-          </div>
-
-          <label>
-            Tags <span class="muted">(comma separated)</span>
-            <input name="ai_tags" value="{{ ai_tags | join(', ') }}">
-          </label>
-
-          <label>
-            Action items <span class="muted">(one per line)</span>
-            <textarea name="ai_action_items" rows="6">{{ ai_action_items | join('
-') }}</textarea>
-          </label>
-
-          {% if ai_entities %}
-            <div class="entity-box">
-              <strong>Detected entities</strong>
-              <div class="tag-row">
-                {% for entity in ai_entities %}
-                  <span class="tag-chip">{{ entity.name }} · {{ entity.type }}</span>
-                {% endfor %}
-              </div>
-            </div>
-          {% endif %}
-
-          <div class="topic-review-box">
-            <div class="section-head">
-              <div>
-                <strong>Attach this entry to topics</strong>
-                <p class="muted">Reuse existing topics, create new ones, or do both. Saving replaces the entry's current topic links.</p>
-              </div>
-              <a href="{{ url_for('topics_index') }}">Browse topics</a>
-            </div>
-
-            {% set suggested_existing = analysis_data.get('suggested_existing_topics', []) %}
-            {% if suggested_existing %}
-              <p class="suggestion-label">AI suggested existing topics</p>
-            {% endif %}
-            <div class="topic-check-grid">
-              {% for topic in topics %}
-                <label class="check-row topic-choice {% if topic.name in suggested_existing %}suggested{% endif %}">
-                  <input type="checkbox" name="entry_topic_ids" value="{{ topic.id }}"
-                    {% if topic.id in attached_topic_ids or topic.name in suggested_existing %}checked{% endif %}>
-                  <span>{{ topic.name }}{% if topic.name in suggested_existing %} <em>AI suggestion</em>{% endif %}</span>
-                </label>
-              {% endfor %}
-            </div>
-
-            <label>
-              New topics <span class="muted">(one per line; edit or remove AI suggestions)</span>
-              <textarea name="new_topic_names" rows="4">{{ analysis_data.get('suggested_new_topics', []) | join('
-') }}</textarea>
-            </label>
-          </div>
-
-          <div class="analysis-source-link">
-            <span>AI content should always be traceable to its source.</span>
-            <a href="{{ url_for('original_transcript', transcript_id=transcript.id) }}">View Original Transcript</a>
-          </div>
-
-          <div class="analysis-meta">
-            <span>Confidence: {% if transcript.ai_confidence is not none %}{{ "%.0f"|format(transcript.ai_confidence * 100) }}%{% else %}—{% endif %}</span>
-            <span>Review: {{ transcript.ai_review_status or "pending" }}</span>
-          </div>
-
-          <div class="button-row">
-            <button type="submit" name="action" value="save">Save Edits</button>
-            <button type="submit" name="action" value="approve" class="primary">Approve Analysis</button>
-            <button type="submit" name="action" value="reject" class="danger-button">Reject</button>
-          </div>
-        </form>
-      {% endif %}
-    </section>
+    <h1>{{ transcript.source_title or transcript.filename|replace('_', ' ') }}</h1>
+    <p class="muted">Created {{ transcript.created_at.strftime('%B %d, %Y at %I:%M %p') }} · Updated {{ transcript.updated_at.strftime('%B %d, %Y at %I:%M %p') }}</p>
   </div>
+  <div class="entry-hero-actions">
+    <a class="button" href="{{ url_for('original_transcript', transcript_id=transcript.id) }}">View original</a>
+    {% if not transcript.is_archived %}
+      <form method="post" action="{{ url_for('archive_transcript', transcript_id=transcript.id) }}" onsubmit="return confirm('Archive this entry? You can restore it later.');">
+        <button type="submit">Archive</button>
+      </form>
+    {% endif %}
+  </div>
+</section>
 
-  <aside class="panel note-panel">
-    <h2>New Note From Selection</h2>
-    <p class="muted">Highlight text in the working copy, then click “Use Selection.”</p>
+<div class="entry-workspace">
+  <main class="entry-main">
+    <section class="panel summary-card">
+      <div class="section-head compact-head">
+        <div>
+          <span class="eyebrow">Overview</span>
+          <h2>AI Summary</h2>
+        </div>
+        <span class="pill {{ transcript.processing_status }}">{{ transcript.processing_status|replace('_', ' ') }}</span>
+      </div>
+      {% if transcript.ai_summary %}
+        <p class="summary-copy">{{ transcript.ai_summary }}</p>
+      {% else %}
+        <p class="empty-state">This entry has not been analyzed yet. Run AI analysis to create a summary, project suggestion, tags, and action items.</p>
+      {% endif %}
+      <form method="post" action="{{ url_for('analyze_transcript', transcript_id=transcript.id) }}">
+        <button type="submit" class="primary inline-button">{% if transcript.ai_summary %}Analyze again{% else %}Analyze with AI{% endif %}</button>
+      </form>
+    </section>
 
-    <button type="button" onclick="copySelectionToNote()">Use Selection</button>
+    <section class="panel">
+      <div class="workspace-tabs" role="tablist">
+        <button type="button" class="workspace-tab active" data-tab-target="working">Working copy</button>
+        <button type="button" class="workspace-tab" data-tab-target="cleaned">Cleaned text</button>
+        <button type="button" class="workspace-tab" data-tab-target="analysis">AI details</button>
+        <button type="button" class="workspace-tab" data-tab-target="notes">Notes</button>
+      </div>
 
-    <form method="post" action="{{ url_for('create_note_from_transcript', transcript_id=transcript.id) }}" class="form-stack note-form">
-      <label>
-        Note / topic name
-        <input name="note_title" id="noteTitle" placeholder="first mushroom experience">
-      </label>
-
-      <label>
-        Note body
-        <textarea name="note_body" id="noteBody" rows="9"></textarea>
-      </label>
-
-      <div class="topic-checks">
-        <strong>Existing topics</strong>
-        {% if topics %}
-          {% for topic in topics %}
-            <label class="check-row">
-              <input type="checkbox" name="topic_ids" value="{{ topic.id }}">
-              {{ topic.name }}
+      <div class="workspace-tab-panel active" data-tab-panel="working">
+        <form method="post" class="form-stack">
+          <div class="tool-grid">
+            <label>Entry title
+              <input name="filename" value="{{ transcript.filename }}">
             </label>
-          {% endfor %}
+            <label>Review status
+              <select name="review_status">
+                <option value="unread" {% if transcript.review_status == 'unread' %}selected{% endif %}>Unread</option>
+                <option value="in_progress" {% if transcript.review_status == 'in_progress' %}selected{% endif %}>In progress</option>
+                <option value="complete" {% if transcript.review_status == 'complete' %}selected{% endif %}>Complete</option>
+              </select>
+            </label>
+          </div>
+          <label>Working copy
+            <textarea id="workingCopy" name="transcript_working" rows="22">{{ transcript.transcript_working }}</textarea>
+          </label>
+          <button class="primary inline-button" type="submit">Save working copy</button>
+        </form>
+      </div>
+
+      <div class="workspace-tab-panel" data-tab-panel="cleaned">
+        {% if transcript.cleaned_text %}
+          <div class="reading-surface">{{ transcript.cleaned_text }}</div>
         {% else %}
-          <p class="muted">No topics yet.</p>
+          <p class="empty-state">No cleaned text yet.</p>
         {% endif %}
       </div>
 
-      <label>
-        Create new topic
-        <input name="new_topic" placeholder="Leave blank unless creating a new topic">
-      </label>
-
-      <label class="check-row">
-        <input type="checkbox" name="remove_from_working" checked>
-        Remove this exact chunk from working copy
-      </label>
-
-      <button type="submit" class="primary">Save Note</button>
-    </form>
-
-    <hr>
-
-    <h2>Notes from this transcript</h2>
-    {% if notes %}
-      <div class="list small-list">
-        {% for note in notes %}
-          <div class="list-item">
-            <strong>{{ note.title }}</strong>
-            <span>{{ note.created_at.strftime("%Y-%m-%d %H:%M") }}</span>
+      <div class="workspace-tab-panel" data-tab-panel="analysis">
+        {% if transcript.processing_error %}<div class="flash error">{{ transcript.processing_error }}</div>{% endif %}
+        {% if transcript.ai_summary or transcript.cleaned_text %}
+        <form method="post" action="{{ url_for('review_ai_analysis', transcript_id=transcript.id) }}" class="form-stack">
+          <label>Cleaned text<textarea name="cleaned_text" rows="16">{{ transcript.cleaned_text or '' }}</textarea></label>
+          <label>Summary<textarea name="ai_summary" rows="5">{{ transcript.ai_summary or '' }}</textarea></label>
+          <div class="tool-grid">
+            <label>Category<input name="ai_category" value="{{ transcript.ai_category or '' }}"></label>
+            <label>Project<input name="ai_project" value="{{ transcript.project.name if transcript.project else transcript.ai_project or '' }}"></label>
           </div>
-        {% endfor %}
+          <label>Tags <span class="muted">comma separated</span><input name="ai_tags" value="{{ ai_tags|join(', ') }}"></label>
+          <label>Action items <span class="muted">one per line</span><textarea name="ai_action_items" rows="6">{{ ai_action_items|join('\n') }}</textarea></label>
+
+          <div class="topic-review-box">
+            <strong>Topics</strong>
+            <div class="topic-check-grid">
+              {% for topic in topics %}
+              <label class="check-row"><input type="checkbox" name="entry_topic_ids" value="{{ topic.id }}" {% if topic.id in attached_topic_ids %}checked{% endif %}>{{ topic.name }}</label>
+              {% endfor %}
+            </div>
+            <label>New topics <span class="muted">one per line</span><textarea name="new_topic_names" rows="3">{{ analysis_data.get('suggested_new_topics', [])|join('\n') }}</textarea></label>
+          </div>
+
+          <div class="button-row">
+            <button type="submit" name="action" value="save">Save edits</button>
+            <button type="submit" name="action" value="approve" class="primary">Approve analysis</button>
+            <button type="submit" name="action" value="reject" class="danger-button">Reject</button>
+          </div>
+        </form>
+        {% else %}<p class="empty-state">Run AI analysis to populate this section.</p>{% endif %}
       </div>
-    {% else %}
-      <p class="muted">No notes yet.</p>
+
+      <div class="workspace-tab-panel" data-tab-panel="notes">
+        <div class="notes-grid">
+          <div>
+            <h3>Create a note from this entry</h3>
+            <p class="muted">Highlight text in the working copy, then use the selection here.</p>
+            <button type="button" class="inline-button" onclick="copySelectionToNote()">Use highlighted text</button>
+            <form method="post" action="{{ url_for('create_note_from_transcript', transcript_id=transcript.id) }}" class="form-stack note-form">
+              <label>Note title<input name="note_title" id="noteTitle" placeholder="A clear, reusable note title"></label>
+              <label>Note body<textarea name="note_body" id="noteBody" rows="9"></textarea></label>
+              <div class="topic-check-grid">
+                {% for topic in topics %}<label class="check-row"><input type="checkbox" name="topic_ids" value="{{ topic.id }}">{{ topic.name }}</label>{% endfor %}
+              </div>
+              <label>Create new topic<input name="new_topic" placeholder="Optional"></label>
+              <label class="check-row"><input type="checkbox" name="remove_from_working">Remove exact text from working copy</label>
+              <button type="submit" class="primary inline-button">Save note</button>
+            </form>
+          </div>
+          <div>
+            <h3>Notes from this entry</h3>
+            {% if notes %}
+              <div class="list small-list">{% for note in notes %}<article class="list-item"><strong>{{ note.title }}</strong><p>{{ note.body }}</p></article>{% endfor %}</div>
+            {% else %}<p class="empty-state">No notes yet.</p>{% endif %}
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <aside class="entry-sidebar">
+    <section class="panel detail-card">
+      <span class="eyebrow">Organization</span>
+      <dl class="detail-list">
+        <div><dt>Project</dt><dd>{% if transcript.project %}<a href="{{ url_for('view_project', project_id=transcript.project.id) }}">{{ transcript.project.name }}</a>{% elif transcript.ai_project %}{{ transcript.ai_project }}{% else %}<span class="muted">None</span>{% endif %}</dd></div>
+        <div><dt>Category</dt><dd>{{ transcript.ai_category or 'Uncategorized' }}</dd></div>
+        <div><dt>Source</dt><dd>{{ transcript.original_filename or transcript.input_type|title }}</dd></div>
+      </dl>
+      {% if transcript.topics %}<div class="tag-row">{% for topic in transcript.topics %}<a class="tag-chip" href="{{ url_for('view_topic', topic_id=topic.id) }}">{{ topic.name }}</a>{% endfor %}</div>{% endif %}
+      {% if ai_tags %}<div class="tag-row secondary-tags">{% for tag in ai_tags %}<span class="tag-chip">#{{ tag }}</span>{% endfor %}</div>{% endif %}
+    </section>
+
+    <section class="panel detail-card">
+      <div class="section-head compact-head"><div><span class="eyebrow">Next steps</span><h2>Action Items</h2></div></div>
+      {% if ai_action_items %}
+        <div class="action-list">
+          {% set completed = transcript.completed_action_items|default('[]') %}
+          {% for action in ai_action_items %}
+            <form method="post" action="{{ url_for('toggle_action_item', transcript_id=transcript.id, action_index=loop.index0) }}" class="action-row">
+              <button class="action-check" type="submit" aria-label="Toggle action item">{% if loop.index0 in completed_action_indexes %}✓{% endif %}</button>
+              <span class="{% if loop.index0 in completed_action_indexes %}completed{% endif %}">{{ action }}</span>
+            </form>
+          {% endfor %}
+        </div>
+      {% else %}<p class="empty-state">No action items.</p>{% endif %}
+    </section>
+
+    {% if ai_entities %}
+    <section class="panel detail-card"><span class="eyebrow">People and things</span><div class="tag-row">{% for entity in ai_entities %}<span class="tag-chip">{{ entity.name }} · {{ entity.type }}</span>{% endfor %}</div></section>
     {% endif %}
   </aside>
-</section>
+</div>
 {% endblock %}

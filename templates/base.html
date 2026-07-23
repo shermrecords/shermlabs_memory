@@ -4,45 +4,69 @@
   <meta charset="utf-8">
   <title>{{ title or "ShermLabs Memory" }}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-  <!-- Favicons -->
   <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" sizes="any">
-  <link rel="icon" type="image/png" sizes="32x32"
-        href="{{ url_for('static', filename='favicon-32x32.png') }}">
-  <link rel="icon" type="image/png" sizes="16x16"
-        href="{{ url_for('static', filename='favicon-16x16.png') }}">
-  <link rel="apple-touch-icon"
-        href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+  <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32x32.png') }}">
+  <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='favicon-16x16.png') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
   {% if current_user.is_authenticated %}
-  <header class="topbar">
-    <a class="brand" href="{{ url_for('index') }}">ShermLabs Memory</a>
-    <nav>
-      <a href="{{ url_for('index') }}">Dashboard</a>
-      <a href="{{ url_for('topics_index') }}">Topics</a>
-      <a href="{{ url_for('upload', type='audio') }}">Audio</a>
-      <a href="{{ url_for('upload', type='text') }}">Paste Text</a>
-      <a href="{{ url_for('upload', type='document') }}">Document</a>
-      <span class="user-email">{{ current_user.email }}</span>
-      <a href="{{ url_for('logout') }}">Logout</a>
-    </nav>
-  </header>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="sidebar-brand" href="{{ url_for('index') }}">
+        <span class="brand-mark">S</span>
+        <span><strong>ShermLabs</strong><small>Memory</small></span>
+      </a>
+
+      <nav class="side-nav" aria-label="Primary navigation">
+        <a class="{% if request.endpoint == 'index' %}active{% endif %}" href="{{ url_for('index') }}"><span>⌂</span> Dashboard</a>
+        <a class="{% if request.endpoint == 'topics_index' or request.endpoint == 'view_topic' %}active{% endif %}" href="{{ url_for('topics_index') }}"><span>◫</span> Topics</a>
+        <a class="{% if request.endpoint == 'projects_index' or request.endpoint == 'view_project' %}active{% endif %}" href="{{ url_for('projects_index') }}"><span>▣</span> Projects</a>
+        <a href="{{ url_for('index') }}#entries"><span>▤</span> Entries</a>
+        <a class="{% if request.endpoint == 'archive_index' %}active{% endif %}" href="{{ url_for('archive_index') }}"><span>□</span> Archive</a>
+      </nav>
+
+      <div class="sidebar-label">Capture</div>
+      <nav class="side-nav compact">
+        <a href="{{ url_for('upload', type='audio') }}"><span>●</span> Record or upload audio</a>
+        <a href="{{ url_for('upload', type='text') }}"><span>✎</span> Paste text</a>
+        <a href="{{ url_for('upload', type='document') }}"><span>＋</span> Upload document</a>
+      </nav>
+
+      <div class="sidebar-spacer"></div>
+      <div class="sidebar-user">
+        <span class="avatar">{{ current_user.email[:1]|upper }}</span>
+        <span class="sidebar-user-copy"><strong>{{ current_user.email.split('@')[0] }}</strong><small>{{ current_user.email }}</small></span>
+      </div>
+      <a class="logout-link" href="{{ url_for('logout') }}">Log out</a>
+    </aside>
+
+    <div class="app-main">
+      <header class="mobile-topbar">
+        <a class="brand" href="{{ url_for('index') }}">ShermLabs Memory</a>
+        <a class="button small-button" href="{{ url_for('upload', type='audio') }}">New entry</a>
+      </header>
   {% endif %}
 
-  <main class="container">
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        <div class="flash-stack">
-          {% for category, message in messages %}
-            <div class="flash {{ category }}">{{ message }}</div>
-          {% endfor %}
-        </div>
-      {% endif %}
-    {% endwith %}
+      <main class="container {% if not current_user.is_authenticated %}guest-container{% endif %}">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <div class="flash-stack">
+              {% for category, message in messages %}
+                <div class="flash {{ category }}">{{ message }}</div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
 
-    {% block content %}{% endblock %}
-  </main>
+        {% block content %}{% endblock %}
+      </main>
+
+  {% if current_user.is_authenticated %}
+    </div>
+  </div>
+  {% endif %}
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>

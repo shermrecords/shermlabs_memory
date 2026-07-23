@@ -493,3 +493,23 @@ function setupMicrophoneRecorder() {
 }
 
 document.addEventListener("DOMContentLoaded", setupMicrophoneRecorder);
+
+// Entry workspace tabs
+function initializeWorkspaceTabs() {
+  const buttons = document.querySelectorAll("[data-tab-target]");
+  const panels = document.querySelectorAll("[data-tab-panel]");
+  if (!buttons.length || !panels.length) return;
+
+  buttons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const target = button.dataset.tabTarget;
+      buttons.forEach((item) => item.classList.toggle("active", item === button));
+      panels.forEach((panel) => panel.classList.toggle("active", panel.dataset.tabPanel === target));
+    });
+  });
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  loadVoices();
+  initializeWorkspaceTabs();
+});

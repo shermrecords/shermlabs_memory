@@ -1,195 +1,156 @@
-# 🧠 ShermLabs Memory
+# ShermLabs Memory
 
-ShermLabs Memory is an AI-powered knowledge management system that transforms voice recordings, documents, notes, and ideas into an organized, searchable second brain.
+ShermLabs Memory is a private Flask application for capturing audio, microphone recordings, pasted text, and documents; preserving the original source; and organizing AI-analyzed content into searchable topics.
 
-Instead of simply storing information, ShermLabs Memory uses AI to transcribe, summarize, organize, and connect your knowledge so it becomes easier to retrieve and build upon over time.
+## New topic knowledge system
 
----
+This build adds direct many-to-many links between entries and topics.
 
-## Features
+After an entry is analyzed, Together AI now returns:
 
-### 🎙 Voice & Audio Capture
+- `suggested_existing_topics`
+- `suggested_new_topics`
+- summary, cleaned text, tags, action items, entities, category, project, and confidence
 
-- Upload audio recordings
-- AI transcription
-- Preserve original transcript
-- Maintain editable working copy
+The analysis review screen lets the user:
 
----
+- accept or remove suggested existing topics
+- attach any other existing topics
+- create one or more new topics
+- attach the same entry to several topics
+- save edits or approve the analysis and topic links
 
-### 📄 Documents & Notes
+Topic links are stored in the SQL database through the `entry_topics` association table. `ai_analysis_json` retains the structured AI response and approved topic names, but it is not yet a vector database or full RAG index.
 
-- Upload documents
-- Paste text directly
-- Create notes from transcripts
-- Rich text editing
+## Topic access
 
----
+Open `/topics` to:
 
-### 🤖 AI Organization
+- browse every topic
+- search topic names
+- see entry and note counts
+- open a combined topic view
 
-Each entry is automatically analyzed to generate:
+Each topic page includes:
 
-- Summary
-- Cleaned text
-- Suggested project
-- Suggested topics
-- Tags
-- Entities
-- Action items
+- directly linked analyzed entries
+- AI summaries and cleaned content
+- saved notes
+- search within that topic's entry and note content
+- links back to each entry's analysis
+- links to the read-only original transcript
+- combined text export
 
-Original content is always preserved.
+## Source provenance
 
----
+Every analyzed entry includes an **Open Original Transcript** link. The dedicated read-only route is:
 
-### 📚 Topics
-
-Organize knowledge into reusable topics.
-
-Topics can contain:
-
-- Voice recordings
-- Documents
-- Notes
-- AI summaries
-
-Browse and search across all related information.
-
----
-
-### 📁 Projects
-
-Projects provide a higher-level organization for groups of related topics.
-
-Example:
-
-```
-Project
-    ShermLabs Memory
-
-        Topics
-            UI Design
-            Authentication
-            AI Features
-            Database
+```text
+/transcript/<entry_id>/original
 ```
 
----
+This preserves the distinction between:
 
-### 🔍 Search
+```text
+Original source → editable working copy → AI analysis
+```
 
-Search across:
+## Microphone recording
 
-- Original transcripts
-- AI cleaned text
-- Notes
-- Summaries
-- Projects
-- Tags
+The Audio capture page can record directly through the browser microphone using the `MediaRecorder` API. Microphone access requires HTTPS in production or localhost during development.
 
----
+## Setup
 
-### 👥 Multi-user
+```bash
+python -m venv venv
+source venv/bin/activate       # macOS/Linux
+# venv\Scripts\activate        # Windows
+pip install -r requirements.txt
+cp .env.example .env
+python app.py
+```
 
-Each user has their own:
+Open `http://127.0.0.1:5000`.
 
-- Entries
-- Notes
-- Topics
-- Projects
+## Main environment variables
 
-Authentication is handled through Flask-Login.
+```env
+SECRET_KEY=
+DATABASE_URL=
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_BUCKET=audio
+TOGETHER_API_KEY=
+TOGETHER_BASE_URL=https://api.together.xyz/v1
+TOGETHER_ANALYSIS_MODEL=openai/gpt-oss-20b
+MAX_CONTENT_MB=100
+```
 
----
+## Database update
 
-## Technology
+On startup, `db.create_all()` creates the new `entry_topics` table automatically. Existing transcripts, topics, and notes remain intact.
 
-Backend
+Before deploying a schema update, back up the production database. This MVP still uses lightweight compatibility migrations; Flask-Migrate/Alembic is recommended before larger production changes.
 
-- Flask
-- SQLAlchemy
-- Flask-Login
-- PostgreSQL (Supabase)
+## Render
 
-Storage
+Build command:
 
-- Supabase Storage
+```bash
+pip install -r requirements.txt
+```
 
-AI
+Start command:
 
-- Together AI
-- Local Whisper support
-- Future embedding pipeline
+```bash
+gunicorn app:app --bind 0.0.0.0:$PORT
+```
 
-Frontend
+Health check:
 
-- HTML
-- CSS
-- JavaScript
+```text
+/health
+```
 
-Deployment
+## Important note about RAG
 
-- Render
+The current build stores structured analysis and topic relationships, making analyzed material accessible later. A full RAG layer would be a later addition:
 
----
+```text
+Entry text → chunks → embeddings → vector store → retrieval → cited answer
+```
 
-## Roadmap
+The topic system should remain the durable organizational layer even after embeddings are added.
 
-### Near Term
+## Version 0.8 Dashboard
 
-- Topic improvements
-- Project dashboard
-- Better search
-- Entry archive
-- Delete confirmation
-- Improved UI
-- Drag-and-drop organization
+This build includes a workspace-style dashboard with:
 
-### Future
+- Persistent desktop sidebar and responsive mobile header
+- Global entry search and status filtering
+- Total-entry, review, topic, and AI-project metrics
+- Continue Working cards
+- Rich recent-entry cards with summaries, source types, projects, and topics
+- Recent Topics panel
+- AI-derived Active Projects panel
+- AI-derived Action Items panel
+- Search results view using the same richer cards
 
-- Semantic embeddings
-- RAG search
-- Knowledge graph
-- AI-generated topic wiki
-- AI chat across your personal knowledge
-- Cross-topic relationship discovery
-- Timeline visualization
+The Projects panel currently groups entries using the existing `ai_project` field, so this release does not require a database migration or a new Project model.
 
----
+## Version 0.9 — Entry Workspaces, Projects, and Archive
 
-## Philosophy
+This build adds:
 
-ShermLabs Memory is designed around one idea:
+- A redesigned entry-detail workspace with tabbed working copy, cleaned text, AI details, and notes
+- Reversible entry archiving, restoring, and archive-only permanent deletion
+- Real Project database records and dedicated project workspaces
+- Action-item completion tracking
+- Automatic conversion of existing `ai_project` labels into Project records
+- Updated sidebar navigation and responsive layouts
 
-> Capture everything once. Never lose an idea again.
+### Upgrading an existing installation
 
-The goal is not simply to store information, but to build a living knowledge system that grows alongside its user.
+Back up PostgreSQL and Supabase Storage before deploying. The application runs its existing lightweight compatibility migration on startup and adds the new transcript columns automatically. The new `project` table is created through `db.create_all()`.
 
----
-
-## Development Status
-
-ShermLabs Memory is currently under active development.
-
-Current capabilities include:
-
-- ✅ User authentication
-- ✅ Audio upload
-- ✅ AI transcription
-- ✅ AI analysis
-- ✅ Topics
-- ✅ Notes
-- ✅ Search
-- ✅ Multi-user support
-- ✅ Cloud database
-- ✅ Cloud storage
-
-Upcoming work focuses on transforming stored information into a fully interconnected AI knowledge system.
-
----
-
-## Contact
-
-**ShermLabs**
-
-📧 sherm@shermlabs.com
+No manual SQL should be necessary for this MVP build. Existing entries remain intact, and existing AI project labels are linked to real projects when the dashboard is opened.

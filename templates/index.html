@@ -1,111 +1,129 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="hero">
+<section class="dashboard-hero">
   <div>
-    <h1>Dashboard</h1>
-    <p>Capture, review, and organize audio, text, and documents in one searchable workspace.</p>
+    <p class="eyebrow">Your knowledge workspace</p>
+    <h1>Good {{ 'morning' if now_hour|default(12) < 12 else 'evening' }}, {{ first_name }}.</h1>
+    <p>{{ added_today }} new {{ 'entry' if added_today == 1 else 'entries' }} today. Pick up where you left off or capture something new.</p>
   </div>
-
-  <div class="hero-actions capture-actions">
-    <a class="button primary" href="{{ url_for('upload', type='audio') }}">🎤 Audio</a>
-    <a class="button" href="{{ url_for('upload', type='text') }}">📄 Paste Text</a>
-    <a class="button" href="{{ url_for('upload', type='document') }}">📁 Document</a>
+  <div class="capture-menu">
+    <a class="button primary" href="{{ url_for('upload', type='audio') }}">● New audio</a>
+    <a class="button" href="{{ url_for('upload', type='text') }}">✎ Paste text</a>
+    <a class="button" href="{{ url_for('upload', type='document') }}">＋ Document</a>
   </div>
 </section>
 
-<div class="stats-grid">
-  <div class="stat-card">
-    <span>Unread</span>
-    <strong>{{ transcripts|selectattr("review_status","equalto","unread")|list|length }}</strong>
-  </div>
-
-  <div class="stat-card">
-    <span>In Progress</span>
-    <strong>{{ transcripts|selectattr("review_status","equalto","in_progress")|list|length }}</strong>
-  </div>
-
-  <div class="stat-card">
-    <span>Complete</span>
-    <strong>{{ transcripts|selectattr("review_status","equalto","complete")|list|length }}</strong>
-  </div>
-
-  <div class="stat-card">
-    <span>Topics</span>
-    <strong>{{ topics|length }}</strong>
-  </div>
-</div>
-
-<form class="filters" method="get">
-  <input name="q" value="{{ q }}" placeholder="Search all entries...">
-
-  <select name="status">
+<form class="global-search" method="get">
+  <span class="search-icon">⌕</span>
+  <input name="q" value="{{ q }}" placeholder="Search entries, summaries, tags, and projects..." aria-label="Search everything">
+  <select name="status" aria-label="Filter by status">
     <option value="">All statuses</option>
     <option value="unread" {% if status == "unread" %}selected{% endif %}>Unread</option>
     <option value="in_progress" {% if status == "in_progress" %}selected{% endif %}>In progress</option>
     <option value="complete" {% if status == "complete" %}selected{% endif %}>Complete</option>
   </select>
-
   <button type="submit">Search</button>
 </form>
 
-<div class="grid-two dashboard-grid">
-  <section class="panel">
-    <div class="section-head">
-      <div>
-        <h2>Entries</h2>
-        <p class="muted">Unread and in-progress items appear first.</p>
-      </div>
-    </div>
-
-    {% if transcripts %}
-      <div class="list">
-        {% for t in transcripts %}
-          <a class="list-item transcript-card" href="{{ url_for('edit_transcript', transcript_id=t.id) }}">
-            <div>
-              <strong>
-                {% if t.review_status == "complete" %}✓{% elif t.review_status == "in_progress" %}◐{% else %}●{% endif %}
-                {{ t.filename }}
-              </strong>
-              <span class="entry-type">{% if t.input_type == "text" %}📄 Text{% elif t.input_type == "document" %}📁 Document{% else %}🎤 Audio{% endif %}</span>
-              <span>
-                {{ t.review_status }}
-                {% if t.recording_date %} · {{ t.recording_date }}{% endif %}
-                {% if t.weekday %} · {{ t.weekday }}{% endif %}
-                {% if t.recording_time %} · {{ t.recording_time }}{% endif %}
-              </span>
-            </div>
-
-            <span class="pill {{ t.review_status }}">{{ t.review_status }}</span>
-          </a>
-        {% endfor %}
-      </div>
-    {% else %}
-      <p class="muted">No entries yet. Capture audio, paste text, or upload a document.</p>
-    {% endif %}
-  </section>
-
-  <section class="panel">
-    <div class="section-head">
-      <div>
-        <h2>Topics</h2>
-        <p class="muted">Entries and notes grouped into reusable knowledge areas.</p>
-      </div>
-    </div>
-
-    {% if topics %}
-      <div class="list">
-        {% for topic in topics %}
-          <a class="list-item" href="{{ url_for('view_topic', topic_id=topic.id) }}">
-            <strong>{{ topic.name }}</strong>
-            <span>{{ topic.entries|length }} entries · {{ topic.notes|length }} notes</span>
-          </a>
-        {% endfor %}
-      </div>
-    {% else %}
-      <p class="muted">No topics yet. Analyze an entry and approve its suggested topics.</p>
-    {% endif %}
-  </section>
+<div class="stats-grid dashboard-stats">
+  <a class="stat-card" href="#entries"><span>Total entries</span><strong>{{ dashboard_stats.entries }}</strong><small>Across every source</small></a>
+  <a class="stat-card" href="{{ url_for('index', status='unread') }}"><span>Needs review</span><strong>{{ dashboard_stats.unread }}</strong><small>Unread entries</small></a>
+  <a class="stat-card" href="{{ url_for('topics_index') }}"><span>Topics</span><strong>{{ dashboard_stats.topics }}</strong><small>Knowledge areas</small></a>
+  <a class="stat-card" href="{{ url_for('projects_index') }}"><span>Projects</span><strong>{{ dashboard_stats.projects }}</strong><small>Active workspaces</small></a>
 </div>
 
-<div class="button-row" style="margin-top:16px;"><a class="button" href="{{ url_for('topics_index') }}">Browse and search all topics</a></div>
+{% if not q and not status %}
+<div class="dashboard-columns">
+  <div class="dashboard-primary">
+    <section class="dashboard-section">
+      <div class="section-head">
+        <div><p class="eyebrow">Resume</p><h2>Continue working</h2></div>
+        <a class="text-link" href="#entries">View all</a>
+      </div>
+      {% if continue_working %}
+      <div class="continue-grid">
+        {% for t in continue_working %}
+        <a class="continue-card" href="{{ url_for('edit_transcript', transcript_id=t.id) }}">
+          <div class="entry-icon {{ t.input_type }}">{% if t.input_type == 'text' %}T{% elif t.input_type == 'document' %}D{% else %}A{% endif %}</div>
+          <div class="card-copy">
+            <div class="card-title-row"><h3>{{ t.source_title or t.filename|replace('_', ' ') }}</h3><span class="pill {{ t.review_status }}">{{ t.review_status|replace('_', ' ') }}</span></div>
+            <p>{{ t.ai_summary or (t.transcript_working or t.transcript_original)|truncate(145) or 'Open this entry to continue reviewing it.' }}</p>
+            <div class="entry-meta"><span>{{ t.input_type|title }}</span><span>Updated {{ t.updated_at.strftime('%b %d') if t.updated_at else '' }}</span></div>
+          </div>
+        </a>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state"><strong>You are all caught up.</strong><p>Capture a new thought, recording, or document to keep building your memory.</p></div>
+      {% endif %}
+    </section>
+
+    <section class="dashboard-section" id="entries">
+      <div class="section-head">
+        <div><p class="eyebrow">Latest</p><h2>Recent entries</h2></div>
+      </div>
+      <div class="entry-feed">
+        {% for t in recent_entries %}
+        <a class="rich-entry-card" href="{{ url_for('edit_transcript', transcript_id=t.id) }}">
+          <div class="entry-icon {{ t.input_type }}">{% if t.input_type == 'text' %}T{% elif t.input_type == 'document' %}D{% else %}A{% endif %}</div>
+          <div class="card-copy">
+            <div class="card-title-row"><h3>{{ t.source_title or t.filename|replace('_', ' ') }}</h3><span class="pill {{ t.review_status }}">{{ t.review_status|replace('_', ' ') }}</span></div>
+            <p>{{ t.ai_summary or (t.transcript_working or t.transcript_original)|truncate(190) or 'No summary yet.' }}</p>
+            <div class="entry-meta">
+              <span>{{ t.input_type|title }}</span>
+              {% if t.ai_project %}<span>{{ t.ai_project }}</span>{% endif %}
+              {% for topic in t.topics[:3] %}<span class="mini-topic">{{ topic.name }}</span>{% endfor %}
+              <span>{{ t.created_at.strftime('%b %d, %Y') if t.created_at else '' }}</span>
+            </div>
+          </div>
+        </a>
+        {% else %}
+        <div class="empty-state"><strong>No entries yet.</strong><p>Your latest recordings, notes, and documents will appear here.</p></div>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+
+  <aside class="dashboard-rail">
+    <section class="rail-card">
+      <div class="section-head"><div><p class="eyebrow">Knowledge</p><h2>Recent topics</h2></div><a class="text-link" href="{{ url_for('topics_index') }}">Browse</a></div>
+      <div class="rail-list">
+        {% for topic in recent_topics %}
+        <a href="{{ url_for('view_topic', topic_id=topic.id) }}"><span class="topic-dot"></span><span><strong>{{ topic.name }}</strong><small>{{ topic.entries|length }} entries · {{ topic.notes|length }} notes</small></span></a>
+        {% else %}<p class="muted">Topics appear after you approve AI suggestions.</p>{% endfor %}
+      </div>
+    </section>
+
+    <section class="rail-card">
+      <div class="section-head"><div><p class="eyebrow">Organization</p><h2>Active projects</h2></div><a class="text-link" href="{{ url_for('projects_index') }}">Browse</a></div>
+      <div class="project-list">
+        {% for project in projects %}
+        <a href="{{ url_for('view_project', project_id=project.id) }}"><span>{{ project.name }}</span><strong>{{ project.entries|length }}</strong></a>
+        {% else %}<p class="muted">AI project suggestions will collect here.</p>{% endfor %}
+      </div>
+    </section>
+
+    <section class="rail-card">
+      <div class="section-head"><div><p class="eyebrow">Follow-up</p><h2>Action items</h2></div></div>
+      <div class="action-list">
+        {% for action in action_items %}
+        <a href="{{ url_for('edit_transcript', transcript_id=action.entry.id) }}"><span class="action-check"></span><span><strong>{{ action.text }}</strong><small>From {{ action.entry.source_title or action.entry.filename|replace('_', ' ') }}</small></span></a>
+        {% else %}<p class="muted">Action items identified by AI will appear here.</p>{% endfor %}
+      </div>
+    </section>
+  </aside>
+</div>
+{% else %}
+<section class="dashboard-section search-results" id="entries">
+  <div class="section-head"><div><p class="eyebrow">Search</p><h2>{{ transcripts|length }} result{{ '' if transcripts|length == 1 else 's' }}</h2></div><a class="text-link" href="{{ url_for('index') }}">Clear filters</a></div>
+  <div class="entry-feed">
+    {% for t in transcripts %}
+    <a class="rich-entry-card" href="{{ url_for('edit_transcript', transcript_id=t.id) }}">
+      <div class="entry-icon {{ t.input_type }}">{% if t.input_type == 'text' %}T{% elif t.input_type == 'document' %}D{% else %}A{% endif %}</div>
+      <div class="card-copy"><div class="card-title-row"><h3>{{ t.source_title or t.filename|replace('_', ' ') }}</h3><span class="pill {{ t.review_status }}">{{ t.review_status|replace('_', ' ') }}</span></div><p>{{ t.ai_summary or (t.transcript_working or t.transcript_original)|truncate(220) or 'No summary yet.' }}</p><div class="entry-meta"><span>{{ t.input_type|title }}</span>{% if t.ai_project %}<span>{{ t.ai_project }}</span>{% endif %}<span>{{ t.created_at.strftime('%b %d, %Y') if t.created_at else '' }}</span></div></div>
+    </a>
+    {% else %}<div class="empty-state"><strong>No matching entries.</strong><p>Try a broader phrase or clear the status filter.</p></div>{% endfor %}
+  </div>
+</section>
+{% endif %}
 {% endblock %}

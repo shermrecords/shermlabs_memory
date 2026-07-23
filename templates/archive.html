@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero"><div><span class="eyebrow">Safety net</span><h1>Archive</h1><p class="muted">Restore entries or permanently delete them.</p></div></section>
+<section class="panel">
+{% if entries %}<div class="entry-card-grid">
+{% for entry in entries %}<article class="knowledge-card"><div class="entry-card-top"><span class="entry-type-badge">{{ entry.input_type|title }}</span><span class="muted">{{ entry.archived_at.strftime('%b %d, %Y') if entry.archived_at else '' }}</span></div><h3>{{ entry.source_title or entry.filename|replace('_',' ') }}</h3><p>{{ entry.ai_summary or entry.transcript_working[:180] }}</p><div class="button-row"><form method="post" action="{{ url_for('restore_transcript', transcript_id=entry.id) }}"><button class="primary" type="submit">Restore</button></form><form method="post" action="{{ url_for('delete_transcript', transcript_id=entry.id) }}" onsubmit="return confirm('Permanently delete this entry and its notes? This cannot be undone.');"><button class="danger" type="submit">Delete permanently</button></form></div></article>{% endfor %}
+</div>{% else %}<p class="empty-state">Nothing is archived.</p>{% endif %}
+</section>
+{% endblock %}
